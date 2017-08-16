@@ -103,7 +103,7 @@ for coding in range(0,29):
 		#	TBS
 		# 	IP pkt TTI
 
-		print "Coding: %d 	CPRI OPTION: %d" % (coding,cpri_option)
+		#print "Coding: %d 	CPRI OPTION: %d" % (coding,cpri_option)
 		# print tbs_table[n_RB - PUCCH_RBs][mcs_2_tbs[MCS_UL]]
 		TBS_UL = tbs_table[CPRI[cpri_option]['PRB'] - PUCCH_RBs][mcs_2_tbs[MCS_UL]]
 		#print "TBS: %.3f" % TBS_UL
@@ -125,7 +125,7 @@ for coding in range(0,29):
 		
 		gops_1 = int((cpri_option*nAnt*n_Sector*a1_UL)/10)
 		splits_info[coding][cpri_option][1]['gops'] = gops_1
-		print "Split1 : %.3f Mbps	GOPS:%d |" % (r1_UL, gops_1),
+		#print "Split1 : %.3f Mbps	GOPS:%d |" % (r1_UL, gops_1),
 		#return r1_UL
 
 		# PHY SPLIT IIIb - SCF
@@ -135,7 +135,7 @@ for coding in range(0,29):
 		
 		gops_2 = int((cpri_option*nAnt*n_Sector*a2_UL*nIQ)/100)
 		splits_info[coding][cpri_option][2]['gops'] = gops_2
-		print "Split2 : %.3f Mbps  GOPS:%d |" % (r2_UL,gops_2)
+		#print "Split2 : %.3f Mbps  GOPS:%d |" % (r2_UL,gops_2)
 		#return r2_UL
 	#	if split==3:
 		
@@ -145,7 +145,7 @@ for coding in range(0,29):
 		gops_3 = int(r3_UL/10)
 		splits_info[coding][cpri_option][3]['bw'] = r3_UL
 		splits_info[coding][cpri_option][3]['gops'] = gops_3
-		print "Split3 : %.3f Mbps	GOPS:%d |" % (r3_UL,gops_3),
+		#print "Split3 : %.3f Mbps	GOPS:%d |" % (r3_UL,gops_3),
 		#return r3_UL
 	#	if split==4:
 		# PHY SPLIT II - SCF
@@ -155,7 +155,7 @@ for coding in range(0,29):
 		splits_info[coding][cpri_option][4]['bw'] = r4_UL
 		gops_4= int(2*gops_2) # Can be better represented.. -> insert every variable of r4_UL in the calculation (insert PUCCH_RBs)
 		splits_info[coding][cpri_option][4]['gops'] = gops_4
-		print "Split4 : %.3f Mbps   GOPS:%d |" % (r4_UL, gops_4)
+		#print "Split4 : %.3f Mbps   GOPS:%d |" % (r4_UL, gops_4)
 		#return r4_UL
 
 	#	if split==5:
@@ -170,7 +170,7 @@ for coding in range(0,29):
 			gops_5= int(gops_4)
 		splits_info[coding][cpri_option][5]['gops'] = gops_5
 		splits_info[coding][cpri_option][5]['bw'] = r5_UL
-		print "Split5 : %.3f Mbps 	GOPS:%d | " % (r5_UL, gops_5),
+		#print "Split5 : %.3f Mbps 	GOPS:%d | " % (r5_UL, gops_5),
 		#return r5_UL
 
 	#	if split==6:
@@ -180,7 +180,7 @@ for coding in range(0,29):
 		gops_6 = int(a6_UP*LayersUL)
 		splits_info[coding][cpri_option][6]['bw'] = r6_UL
 		splits_info[coding][cpri_option][6]['gops'] = gops_6
-		print "Split6 : %.3f Mbps	GOPS:%d |" % (r6_UL,gops_6)
+		#print "Split6 : %.3f Mbps	GOPS:%d |" % (r6_UL,gops_6)
 		#return r6_UP
 
 	#	if split==7:
@@ -196,7 +196,7 @@ for coding in range(0,29):
 		GOPS_total= gops_1+gops_2+gops_3+gops_4+gops_5+gops_6+gops_7
 		splits_info[coding][cpri_option]['gops_total']= GOPS_total
 
-		print "Split7 : %.3f Mbps	GOPS:%d 	GOPS TOTAL Split1:%d|\n" % (r7_UL,gops_7,GOPS_total)
+		#print "Split7 : %.3f Mbps	GOPS:%d 	GOPS TOTAL Split1:%d|\n" % (r7_UL,gops_7,GOPS_total)
 
 		for split in range(1,8):
 			edge_gops=0
@@ -222,8 +222,8 @@ for coding in range(0,29):
 #print(data_as_dict)
 
 # splits_info[MCS][CPRI option][Split]
-for cada in range(1,8):
-	print splits_info[28][7][cada]
+#for cada in range(1,8):
+#	print splits_info[28][1][cada]
 
 #print({k: dict(v) for k, v in dict(group_ids).items()})
 
@@ -242,7 +242,7 @@ class EdgeCloud(object):
 		self.baseline_energy= AC_energy + battery_energy + base_cores_energy
 
 		self.midhaul_receiver = self.env.process(self.EC_receiver())
-		self.midhaul_sender =
+		#self.midhaul_sender =
 
 class CentralCloud(object):
 	def __init__(self,env,n_vBBUs,num_cores):
@@ -275,92 +275,71 @@ class vBBU(object):
 	 We consider RRHs to not shutdown for energy saving, they're always UP
 	-------------------------------------
 	"""
-	def __init__ (self,env,vBBU_id,splitting_table,cell_RRH_ids,GOPS_per_core=8000,\
-					exclusive=False,CentralCloud=False,initial_coreid=1):
-		# future work to create a core (or CPU class) and put them into BBUs
+	def __init__ (self,env,vBBU_id,splitting_table,GOPS=8000,CentralCloud=False):
 		self.env= env
 		self.vBBU_id = vBBU_id
-		self.num_cores=_num_cores
-		self.core_resource={} # creating dict of cores resource
-		for core_id in range(initial_coreid,num_cores+1): # vBBU's cores from 1 to X
-			self.core_resource[core_id]= simpy.Store(env)	
-
-		self.exclusive_cores= exclusive
-		if exclusive_cores: 					# IF cores are exclusive for a RRH
-			if len(cores) == len(cell_RRH_ids):
-				core_id=initial_coreid
-				# dict table with RRHs info. Orchestrator alters RRH splits by modifying this table
-				# Core Resource of a RRH is also in this dict   
-				self.table_rrh_id=defaultdict(lambda : defaultdict(int))
-				count=initial_coreid
-				for rrh_id in cell_RRH_ids:		# RRH to core reserve mapping
-					self.table_rrh_id[rrh_id]['split']=7
-					self.table_rrh_id[rrh_id]['cpu']= count
-					count+=1
-			else:
-	   			print "Error: Not enough exclusive cores (%d) for RRH amount (%d)" % (len(cores),len(cell_RRH_ids))
-				return False
-		
+		self.proc = simpy.Store(env)
 		self.splitting_table= splitting_table 	# defaultdict with bw&gops per split
-		self.GOPS_per_core= GOPS_per_core # every core is equal and default=8000GOPS
-		self.GOPS_total= self.GOPS_per_core * num_cores
+		self.GOPS= GOPS # every bbu is equal by default=8000GOPS
 
-		# edge/central cloud base Cores energy makes sense
 		if CentralCloud:
 			self.core_dyn_energy=15	# energy of CPU, memory, hdd, mboard, etc of 1 core under 100% usage
 		else:
 			self.core_dyn_energy=30
+		self.split=7
+		#self.FH_port = 
+		#self.MID_port = 
+		#self.FH_receiver = self.env.process(self.FH_receiver(FH_port))
+		#self.MID_receiver = self.env.process(self.MID_receiver(MID_port))
+		#self.MID_sender = self.env.process(self.MID_sender(MID_port))
+		cpri_option=3
+		coding = 28
+		rrh_id=1
+		pkt_id=1
+		self.pkt= PacketCPRI(self.env.now,rrh_id,coding,cpri_option,pkt_id)
 
-	def get_pkt(self):
-		"""process to get the packet from the FH port buffer  """
-		pass
+	#def FH_receiver(self,FH_port):
+		"""process to get the packet from the FH port buffer"""
+		self.action= self.env.process(self.run(self.pkt))
 
-	# Every processing function has its necessary GOPS to be done
-	# Timeout calculated by GOPS_required / GOPS_BBU
-	# Energy calculated by Watts * timeout
-	def proc_timeout(self,GOPS_function,GOPS_per_core):
-		
-		yield proc_timeout
-		# energy calc
-		# energy_calc()
-		#yield self.env.timeout(proc_timeout)
 
-#	def proc_energy_calc(self,core_dyn_energy,time_proc):
-		#simple way
-#		energy = time_proc * ((core_dyn_energy)/1000)
-#		return energy
+	def run(self,pkt):
+		yield env.process(self.splitting(pkt,2))
 
-	def calc_gops(self,pkt_MCS,pkt_CPRI_option,pkt_split):
-		# CP1   CP2   CP3  |  UP1 	UP2   UP3
-		#				 split here = split 4
-		# sum GOPS of all VNF before split
-		pass
 
-	def split_1(self,pkt):
+	def splitting(self,pkt,split):
 		# take gops from our big dict
 		#codingpkt[]
 		#coding=
-		pkt_MCS = pkt['MCS']
-		pkt_CPRI_option = pkt['CPRI_option']
-
-		pkt_rrh_id = pkt['rrh_id']
-		pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
+		pkt_coding = pkt.coding
+		print "Coding: %d" % pkt_coding
+		pkt_CPRI_option = pkt.CPRI_option
+		print "CPRI_OPTION %d" % pkt_CPRI_option
+		pkt_rrh_id = pkt.rrh_id
+		print "RRH ID %d " % pkt_rrh_id
+		pkt_split = split
+		print "Split: %d" % pkt_split
+		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
+		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
 		
 
 		#by packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
-		GOPS = self.splitting_table[pkt_MCS][pkt_CPRI_option][pkt_split]['edge_gops']
-		bw_split = self.splitting_table[pkt_MCS][pkt_CPRI_option][pkt_split]['bw']
-		
+		GOPS = self.splitting_table[pkt_coding][pkt_CPRI_option][pkt_split]['edge_gops']
+		print "GOPS: %d" % GOPS
+		print "Self gops %d" % self.GOPS
+		bw_split = (self.splitting_table[pkt_coding][pkt_CPRI_option][pkt_split]['bw'])/1000
+		print "BW pkt split: %f Mb" % bw_split
 		#timeout proc
-		proc_tout = float(GOPS/self.GOPS_per_core)
-		energy = proc_tout * ((self.core_dyn_energy)/1000) # /1000 == measured in 1ms instead of 1s
-		proc_timeout(GOPS_SP1,self.GOPS_per_core)
+		proc_tout = float(GOPS)/self.GOPS
+		print "Proc Timeout %f" % proc_tout
+		energy = float(proc_tout) * (self.core_dyn_energy) # /1000 == measured in 1ms instead of 1s
+		print "Energy consumption: %f W" % energy
+		yield self.env.timeout(proc_tout)
+		print "After t_out. Time now= %f" % self.env.now
 
 		# LOG the proc energy usage
 		#energy_file.write( "{},{},{},{},{},{},{},{}\n".format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
-		
-		#timeout de processamento sempre < 1ms
-		# algo similar a ..env.store.timeout(timeout_sp1) 
+
 	def split_2(pkt):
 		GOPS_SP2= 450
 		
@@ -396,16 +375,21 @@ class vBBU(object):
 		# Execute the function
 		return func()
 
+#class FHPort(object):
+
+
 class PacketCPRI(object):
     """ This class represents a network packet """
-
-    def __init__(self, time, CPRI_option, id, src="a", dst="z"):
-        self.time = time# creation time
-        self.id = id # packet id
-        self.src = src #packet source address
-        self.dst = dst #packet destination address
-  		self.coding = coding
-  		self.CPRI_option = CPRI_option
+    def __init__(self, time,rrh_id, coding, CPRI_option, id, src="a", dst="z"):
+		self.time = time# creation time
+		self.rrh_id= rrh_id
+		self.coding = coding #same as MCS
+		self.CPRI_option = CPRI_option
+		#self.PRB = PRB #not represented for now
+		self.id = id # packet id
+		self.src = src #packet source address
+		self.dst = dst #packet destination address
+		
 
     def __repr__(self):
         return "id: {}, src: {}, time: {}, CPRI_option: {}, coding: {}".\
@@ -413,13 +397,14 @@ class PacketCPRI(object):
 
 class PacketGenerator(object):
     """This class represents the packet generation process """
-    def __init__(self, env, id,  adist, sdist, fix_pkt_size=None, finish=float("inf")):
-        self.id = id # packet id
+    def __init__(self, env, rrh_id, adist, finish=float("inf")):
+        self.rrh_id = rrh_id # packet id
         self.env = env # Simpy Environment
         self.arrivals_dist = adist #packet arrivals distribution
-        self.size_dist = sdist #packet size distribution
 
-        self.fix_pkt_size = fix_pkt_size # Fixed packet size
+        self.coding = 28 #coding fixed for now
+        self.CPRI_option = 3 #cpri_option fixed for now
+        
         self.finish = finish # packet end time
         self.out = None # packet generator output
         self.packets_sent = 0 # packet counter
@@ -430,58 +415,60 @@ class PacketGenerator(object):
         """
         while self.env.now < self.finish:
             # wait for next transmission
-            yield self.env.timeout(self.arrivals_dist())
+            yield self.env.timeout(self.arrivals_dist)
             self.packets_sent += 1
-
-            if self.fix_pkt_size:
-                p = PacketCPRI(self.env.now, self.fix_pkt_size, self.packets_sent, src=self.id)
-                #Logging
-                #pkt_file.write("{}\n".format(self.fix_pkt_size))
-            else:
-                size = self.size_dist()
-                p = PacketCPRI(self.env.now, size, self.packets_sent, src=self.id)
-                #Logging
-                #pkt_file.write("{}\n".format(size))
+            print "New packet generated at %f" % self.env.now
+    
+            p = PacketCPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id)
+            #time,rrh_id, coding, CPRI_option, id, src="a"
+            print p
+            #Logging
+            #pkt_file.write("{}\n".format(self.fix_pkt_size))
             self.out.put(p) # put the packet in RRH port
 
 
-class Cell(object):
-	"""Class representing a fixed set of RRHs connected to a fixed BBU"""
-	def __init__(self,env,cell_id,edge_bbu_id,num_rrhs,exp,qlimit,fix_pkt_size):
-		self.env = env
-        self.cell_id = cell_id #Cell indentifier
+# class Cell(object):
+# 	"""Class representing a fixed set of RRHs connected to a fixed BBU"""
+# 	def __init__(self,env,cell_id,edge_bbu_id,num_rrhs,exp,qlimit,fix_pkt_size):
+# 		self.env = env
+#         self.cell_id = cell_id #Cell indentifier
                 
-        self.rrh_dict={}
-        for rrh_id in range(1,num_rrhs+1):
-        	#creates the packet generator for each RRH and places it into dict
-        	self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,edge_bbu_id,exp,qlimit,fix_pkt_size)
+#         self.rrh_dict={}
+#         for rrh_id in range(1,num_rrhs+1):
+#         	#creates the packet generator for each RRH and places it into dict
+#         	self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,edge_bbu_id,exp,qlimit,fix_pkt_size)
         
 
 class RRH(object):
 	"""Class representing each RRH with its own packet generation (Uplink) to a fixed BBU"""
-	def __init__(self,env,cell_id,rrh_id,edge_bbu_id,exp,qlimit,fix_pkt_size):
+	def __init__(self,env,cell_id,rrh_id,edge_bbu_id,qlimit):
 		self.env = env
 		self.cell_id = cell_id
 		self.id = rrh_id
-
-		arrivals_dist = functools.partial(random.expovariate, exp) #packet arrival distribuition
-        size_dist = functools.partial(random.expovariate, 0.1)  # packet size distribuition, mean size 100 bytes
-		self.pg = PacketGenerator(self.env, "rrh_"+rrh_id, arrivals_dist, size_dist,fix_pkt_size)
+		arrivals_dist = 1 # fixed 1 ms
+		self.pg = PacketGenerator(self.env, "rrh_1", arrivals_dist)
 
 		if qlimit == 0:# checks if the queue has a size limit
-            queue_limit = None
-        else:
-            queue_limit = qlimit
+			queue_limit = None
+		else:
+			queue_limit = qlimit
 
-        self.port = RRHPort(self.env, qlimit=queue_limit) #create FH PORT
-        self.pg.out = self.port #forward packet generator output to EdgeCloud port
-        self.sender = self.env.process(self.RRH_sender(odn))
-        #self.receiver = self.env.process(self.ONU_receiver(odn))
+		self.port = RRHPort(self.env, qlimit=queue_limit) #create RRH PORT (FH) to bbu
+		self.pg.out = self.port #forward packet generator output to EdgeCloud port
+		#self.sender = self.env.process(self.RRH_sender(odn))
+		#self.receiver = self.env.process(self.ONU_receiver(odn))
+		
+		#self.action=self.env.process(self.run())
 
-    def RRH_sender(self,env):
-    	while True:
-    		 = yield odn.get_grant(self.oid)
+#	def RRH_sender(self,env):
+#		while True:
+#    		 = yield odn.get_grant(self.oid)
+		
 
+	# def run(self):
+	# 	while True:
+	# 		adist=1
+	# 		yield self.env.process(self.pg.run())
 
 class RRHPort(object):
     def __init__(self, env, qlimit=None):
@@ -490,8 +477,9 @@ class RRHPort(object):
         self.out = None # RRH port output
         self.packets_rec = 0 #received pkt counter
         self.packets_tx = 0 #received pkt counter
-        #self.packets_drop = 0 #dropped pkt counter
+        self.packets_drop = 0 #dropped pkt counter
         self.qlimit = qlimit #Buffer queue limit
+        self.byte_size = 0  # Current size of the buffer in bytes
         self.action = env.process(self.run())  # starts the run() method as a SimPy process
         self.pkt = None #network packet obj
 
@@ -595,7 +583,11 @@ class RRHPort(object):
         """
 
         self.packets_rec += 1
-        tmp = self.byte_size + pkt.size
+        print "+1 RRHPort pkt. Packets received: %d" % self.packets_rec
+        pkt_size = (splits_info[pkt.coding][pkt.CPRI_option][1]['bw'])/1000
+        print "Pkt size: %f" % pkt_size
+        tmp = self.byte_size + pkt_size
+        print "RRHPort buffer size: %f"  % tmp
         if self.qlimit is None: #checks if the queue size is unlimited
             self.byte_size = tmp
             return self.buffer.put(pkt)
@@ -606,133 +598,18 @@ class RRHPort(object):
             self.byte_size = tmp
             self.buffer.put(pkt)
 
+class FH_switch(object):
+	def __init__(self,env,vBBU_list,RRH_list):
+	pass
 
-
-class MidhaulPort(object):
-    def __init__(self, env, qlimit=None):
-        self.buffer = simpy.Store(env)#buffer
-        self.env = env
-        self.out = None # ONU port output
-        self.packets_rec = 0 #received pkt counter
-        self.packets_drop = 0 #dropped pkt counter
-        self.qlimit = qlimit #Buffer queue limit
-        self.byte_size = 0  # Current size of the buffer in bytes
-        self.last_buffer_size = 0 # size of the last buffer request
-        self.busy = 0  # Used to track if a packet is currently being sent
-        self.action = env.process(self.run())  # starts the run() method as a SimPy process
-        self.pkt = None #network packet obj
-        self.grant_loop = False #flag if grant time is being used
-
-    def set_grant(self,grant): #setting grant byte size and its ending
-        self.grant_size = grant['grant_size']
-        self.grant_final_time = grant['grant_final_time']
-
-    def update_last_buffer_size(self,requested_buffer): #update the size of the last buffer request
-        self.last_buffer_size = requested_buffer
-
-    def get_last_buffer_size(self): #return the size of the last buffer request
-        return self.last_buffer_size
-
-    def get_pkt(self):
-        """process to get the packet from the buffer   """
-
-        try:
-            pkt = (yield self.buffer.get() )#getting a packet from the buffer
-            self.pkt = pkt
-
-        except simpy.Interrupt as i:
-            logging.debug("Error while getting a packet from the buffer ({})".format(i))
-
-            pass
-
-        if not self.grant_loop:#put the pkt back to the buffer if the grant time expired
-
-            self.buffer.put(pkt)
-
-
-
-    def send(self,ONU_id):
-        """ process to send pkts
-        """
-        self.grant_loop = True #flag if grant time is being used
-        start_grant_usage = None #grant timestamp
-        end_grant_usage = 0 #grant timestamp
-
-        while self.grant_final_time > self.env.now:
-
-            get_pkt = self.env.process(self.get_pkt())#trying to get a package in the buffer
-            grant_timeout = self.env.timeout(self.grant_final_time - self.env.now)
-            yield get_pkt | grant_timeout#wait for a package to be sent or the grant timeout
-
-            if (self.grant_final_time <= self.env.now):
-                #The grant time has expired
-                break
-            if self.pkt is not None:
-                pkt = self.pkt
-                if not start_grant_usage:
-                    start_grant_usage = self.env.now #initialized the real grant usage time
-                start_pkt_usage = self.env.now ##initialized the pkt usage time
-
-            else:
-                #there is no pkt to be sent
-                logging.debug("{}: there is no packet to be sent".format(self.env.now))
-                break
-            self.busy = 1
-            self.byte_size -= pkt.size
-            if self.byte_size < 0:#Prevent the buffer from being negative
-                logging.debug("{}: Negative buffer".format(self.env.now))
-                self.byte_size += pkt.size
-                self.buffer.put(pkt)
-                break
-
-            bits = pkt.size * 8
-            sending_time = 	bits/float(1000000000) # buffer transmission time
-
-            #To avoid fragmentation by passing the Grant window
-            if env.now + sending_time > self.grant_final_time + self.guard_interval:
-                self.byte_size += pkt.size
-
-                self.buffer.put(pkt)
-                break
-
-            #write the pkt transmission delay
-            delay_file.write( "{},{}\n".format( ONU_id, (self.env.now - pkt.time) ) )
-            yield self.env.timeout(sending_time)
-
-            end_pkt_usage = self.env.now
-            end_grant_usage += end_pkt_usage - start_pkt_usage
-
-            self.pkt = None
-
-        #ending of the grant
-        self.grant_loop = False #flag if grant time is being used
-        if start_grant_usage:# if any pkt has been sent
-            #send the real grant usage
-            self.grant_real_usage.put( [start_grant_usage , start_grant_usage + end_grant_usage] )
-        else:
-            #logging.debug("buffer_size:{}, grant duration:{}".format(b,grant_timeout))
-            self.grant_real_usage.put([])# send a empty list
-
-
-
-    def run(self): #run the port as a simpy process
-        while True:
-            yield self.env.timeout(5)
-
-
-    def put(self, pkt):
-        """receives a packet from the packet genarator and put it on the queue
-            if the queue is not full, otherwise drop it.
-        """
-
-        self.packets_rec += 1
-        tmp = self.byte_size + pkt.size
-        if self.qlimit is None: #checks if the queue size is unlimited
-            self.byte_size = tmp
-            return self.buffer.put(pkt)
-        if tmp >= self.qlimit: # chcks if the queue is full
-            self.packets_drop += 1
-            #return
-        else:
-            self.byte_size = tmp
-            self.buffer.put(pkt)
+env = simpy.Environment()
+splitting_table=splits_info
+#print splitting_table
+vBBU_id=1
+#bbu = vBBU(env,vBBU_id,splitting_table)
+rrh_id = 1
+adist = 1
+#x = PacketGenerator(env, rrh_id, adist)
+cell_id=1
+RRH= RRH(env,cell_id,rrh_id,vBBU_id,0)
+env.run(until=5)
