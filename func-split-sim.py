@@ -233,7 +233,7 @@ for coding in range(0,29):
 # list[antenaIDs], setor=2*qtd antenas, 
 # 
 
-class EdgeCloud(object):
+class Edge_Cloud(object):
 	def __init__ (self,env,n_vBBUs,FH_switch,MID_switch):
 		self.env=env
 		#self.baseline_energy=700	#from rodrigo's paper
@@ -249,7 +249,7 @@ class EdgeCloud(object):
 		self.MID_receiver = self.env.process(self.MID_receiver())
 		self.MID_sender = self.env.process(self.MID_sender())
 
-class CentralCloud(object):
+class Central_Cloud(object):
 	def __init__(self,env,n_vBBUs):
 		self.env=env
 		self.AC_energy= n_vBBUs * 50
@@ -272,12 +272,22 @@ class vBBU_FH_Port(object):
         self.pkt = None #network packet obj
 
 class Edge_vBBU_Pool(object):
-	def __init__(self,env,n_vBBUs):
-		self.env=env
-		self.AC_energy= num_cores * 50
-		self.battery_energy= num_cores *10
-		self.base_cores_energy= num_cores * 5
-		self.baseline_energy= AC_energy + battery_energy + base_cores_energy
+	def __init__(self,env,cell_id,n_vBBUs,edge_vBBU_dict,FH_phi_port):
+		self.env = env
+		self.cell_id = cell_id
+		self.FH_phi_port = FH_phi_port
+		self.edge_vBBU_dict = edge_vBBU_dict
+		
+		self.baseline_energy = 5 + (n_vBBUs * 5)
+
+		# here run monitoring or something alike 
+		# self.action = self.env.process(self.monitoring())
+
+	def set_vBBU_split(self,vBBU_id,split):
+		# orchestrator changing a split option of a vBBU
+		edge_vBBU_dict[vBBU_id].set_split(split)
+
+
 
 class vBBU(object): # PARENT CLASS
 	"""-------------- COMMENTS -------------
@@ -301,15 +311,16 @@ class vBBU(object): # PARENT CLASS
 	 We consider RRHs to not shutdown for energy saving, they're always UP
 	-------------------------------------
 	"""
-	def __init__ (self,env,vBBU_id,splitting_table,FH_switch,GOPS=8000):
+	def __init__ (self,env,cell_id,vBBU_id,splitting_table,GOPS=8000):
 		self.env= env
+		self.cell_id = cell_id
 		self.id = vBBU_id
 		self.splitting_table= splitting_table 	# defaultdict with bw&gops per split
 		self.GOPS= GOPS # every bbu is equal by default=8000GOPS
 
-class metro_vBBU(vBBU):
-	def __init__(self,env,vBBU_id,splitting_table,MID_switch,GOPS=8000,core_dyn_energy=15):
-		vBBU.__init__(self,env,vBBU_id,splitting_table,FH_switch,GOPS)
+class Metro_vBBU(vBBU):
+	def __init__(self,env,cell_id,vBBU_id,splitting_table,MID_switch,GOPS=8000,core_dyn_energy=15):
+		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS)
 		self.core_dyn_energy = core_dyn_energy
 		self.MID_switch = MID_switch
 		#self.MID_receiver = self.env.process(self.MID_receiver(MID_port))
@@ -352,14 +363,13 @@ class metro_vBBU(vBBU):
 		#energy_file.write( "{},{},{},{},{},{},{},{}\n".format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
 
 
-class edge_vBBU(vBBU):
-	def __init__(self,env,vBBU_id,splitting_table,FH_switch,MID_switch,metro_vBBU=None,GOPS=8000,core_dyn_energy=30):
-		vBBU.__init__(self,env,vBBU_id,splitting_table,FH_switch,GOPS)
+class Edge_vBBU(vBBU):
+	def __init__(self,env,cell_id,vBBU_id,splitting_table,MID_switch,metro_vBBU=None,GOPS=8000,core_dyn_energy=30):
+		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS)
 		self.core_dyn_energy = core_dyn_energy
 		self.metro_vBBU = metro_vBBU #temporary testing var
 		self.split=2 # variable not in metro_vbbu, because after edgesplit the pkt gets variable split
-		self.FH_phi_port = FH_phi_port_edge_pool()
-		self.FH_switch = FH_switch
+		self.UL_FH_buffer = simpy.Store(self.env)
 		self.MID_switch = MID_switch
 		self.FH_receiver = self.env.process(self.FH_receiver()) # get from FH_switch buffer
 		
@@ -377,7 +387,8 @@ class edge_vBBU(vBBU):
 		while True:
 			print "Time: %f. BBU%d waiting for pkt in FH_Switch" % (self.env.now, self.id)
 			#pkt= yield self.FH_switch.upstream[self.id].get()
-			pkt= yield self.FH_port.buffer.get()
+			#pkt= yield self.FH_port.buffer.get()
+			pkt = yield self.UL_FH_buffer.get()
 			
 			print "Time: %f. BBU%d sending packet to splitting process" % (self.env.now,self.id)
 			yield self.env.process(self.splitting(pkt))
@@ -421,7 +432,7 @@ class edge_vBBU(vBBU):
 		#energy_file.write( "{},{},{},{},{},{},{},{}\n".format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
 
 
-class PacketCPRI(object):
+class Packet_CPRI(object):
     """ This class represents a network packet """
     def __init__(self, time,rrh_id, coding, CPRI_option, id, src="a", dst="z"):
 		self.time = time# creation time
@@ -439,7 +450,7 @@ class PacketCPRI(object):
         return "id: {}, src: {}, time: {}, CPRI_option: {}, coding: {}".\
             format(self.id, self.src, self.time, self.CPRI_option, self.coding)
 
-class PacketGenerator(object):
+class Packet_Generator(object):
     """This class represents the packet generation process """
     def __init__(self, env, rrh_id, adist, finish=float("inf")):
         self.rrh_id = rrh_id # packet id
@@ -463,7 +474,7 @@ class PacketGenerator(object):
             self.packets_sent += 1
             print "New packet generated at %f" % self.env.now
     
-            p = PacketCPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id)
+            p = Packet_CPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id)
             #time,rrh_id, coding, CPRI_option, id, src="a"
             print p
             #Logging
@@ -472,47 +483,49 @@ class PacketGenerator(object):
             # call the function put() of RRHPort, inserting the generated packet into RRHPort' buffer
 
 
-# class Cell(object):
-# 	"""Class representing a fixed set of RRHs connected to a fixed BBU"""
-# 	def __init__(self,env,cell_id,edge_bbu_id,num_rrhs,exp,qlimit,fix_pkt_size):
-# 		self.env = env
-#         self.cell_id = cell_id #Cell indentifier
-                
-#         self.rrh_dict={}
-#         for rrh_id in range(1,num_rrhs+1):
-#         	#creates the packet generator for each RRH and places it into dict
-#         	self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,edge_bbu_id,exp,qlimit,fix_pkt_size)
+class Cell(object):
+	"""Class representing a fixed set of RRHs connected to a fixed BBU"""
+	def __init__(self,env,cell_id,edge_bbu_id,num_rrhs,exp,qlimit,fix_pkt_size):
+		self.env = env
+		self.cell_id = cell_id #Cell indentifier
+		self.rrh_dict={}
+		for rrh_id in range(1,num_rrhs+1):
+			#creates the packet generator for each RRH and places it into dict
+			self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,edge_bbu_id,exp,qlimit,fix_pkt_size)
         
 
 class RRH(object):
 	"""Class representing each RRH with its own packet generation (Uplink) to a fixed BBU"""
-	def __init__(self,env,cell_id,rrh_id,edge_bbu_id,qlimit,FH_switch):
+	#def __init__(self,env,cell_id,rrh_id,edge_bbu_id,qlimit,FH_switch):
+	def __init__(self,env,cell_id,rrh_id,edge_bbu_id,qlimit,FH_phi_port):
 		self.env = env
 		self.cell_id = cell_id
 		self.id = rrh_id
 		arrivals_dist = 1 # fixed 1 ms
 		self.str_id = str(self.id)
-		self.pg = PacketGenerator(self.env, 'rrh_'+self.str_id, arrivals_dist)
+		self.pg = Packet_Generator(self.env, self.id, arrivals_dist)
 
 		if qlimit == 0:# checks if the queue has a size limit
 			queue_limit = None
 		else:
 			queue_limit = qlimit
 
-		self.port = RRHPort(self.env, qlimit=queue_limit) #create RRH PORT (FH) to bbu
+		self.port = RRH_Port(self.env, qlimit=queue_limit) #create RRH PORT (FH) to bbu
 		self.pg.out = self.port #forward packet generator output to RRH port
-		self.sender = self.env.process(self.RRH_sender(FH_switch))
+		#self.sender = self.env.process(self.RRH_sender(FH_switch))
+		self.sender = self.env.process(self.RRH_sender(FH_phi_port))
 		#self.receiver = self.env.process(self.ONU_receiver(odn))
 		
 		#self.action=self.env.process(self.run())
 
-	def RRH_sender(self,FH_switch):
+	def RRH_sender(self,FH_phi_port_edge_pool):
 		while True:
    			pkt = yield self.port.buffer.get()
    			self.port.byte_size -= pkt.size
    			if self.port.byte_size < 0:
    				print "Error: RRH %d port buffer sizer < 0" % self.id
-   			FH_switch.put_UL(self.id,pkt)
+   			#FH_switch.put_UL(self.id,pkt)
+   			FH_phi_port_edge_pool.upstream.put(pkt)
    			self.port.packets_tx +=1
 		
 	# def run(self):
@@ -520,7 +533,7 @@ class RRH(object):
 	# 		adist=1
 	# 		yield self.env.process(self.pg.run())
 
-class RRHPort(object):
+class RRH_Port(object):
     def __init__(self, env, qlimit=None):
         self.buffer = simpy.Store(env) #buffer
         self.env = env
@@ -559,74 +572,61 @@ class RRHPort(object):
             self.buffer.put(pkt)
 
 class FH_phi_port_edge_pool(object):
-	def __init__(self,env,NUMBER_OF_RRHs,vBBU_obj_dict):
+	def __init__(self,env,cell_id,NUMBER_OF_RRHs,vBBU_obj_dict):
 		self.env = env
+		self.cell_id = cell_id
 		self.vBBU_obj_dict = vBBU_obj_dict
 		self.num_RRHs=NUMBER_OF_RRHs
-		
+		self.UL_pkt_rx = 0
+		self.UL_pkt_tx = 0
 		# lets consider there's only a single physical port from cell to vBBU pool.
 		self.upstream = simpy.Store(env)
 		#self.downstream = []
 
 		self.action = env.process(self.FH_to_vBBU())
-        
-        #for i in range(NUMBER_OF_RRHs):
-        #    self.downstream.append(simpy.Store(env))
 
-    def set_vBBU_dict(self,vBBU_obj_dict):
-    	self.vBBU_obj_dict = vBBU_obj_dict
-
-    def FH_to_vBBU(self):
-    	while True:
-	    	pkt = yield self.upstream.get() # get pkt from a RRH of cell
-	    	# insert pkt in virtual vBBU port
-	    	self.vBBU_obj_dict[pkt.rrh_id].buffer.put(pkt)
-
-class FH_switch(object):
-	def __init__(self,env,NUMBER_OF_RRHs):
-		self.env = env
+	def set_vBBU_dict(self,vBBU_obj_dict):
 		self.vBBU_obj_dict = vBBU_obj_dict
+
+	def FH_to_vBBU(self):
+		while True:
+			pkt = yield self.upstream.get() # get pkt from a RRH of cell
+			#
+			# insert pkt in virtual vBBU port
+			self.vBBU_obj_dict[pkt.rrh_id].UL_FH_buffer.put(pkt)
+
+
+class MID_phi_port_edge_pool(object):
+	def __init__(self,env,cell_id,NUMBER_OF_RRHs,vBBU_edge_obj_dict,vBBU_metro_obj_dict):
+		self.env = env
+		self.cell_id = cell_id
+		self.edge_vBBU_obj_dict = edge_vBBU_obj_dict
+		self.metro_vBBU_obj_dict = metro_vBBU_obj_dict
 		self.num_RRHs=NUMBER_OF_RRHs
 		
-		#self.downstream = []
-		self.upstream = []
+		# consider there's only a single phy port for vBBUpool at midhaul with UL and DL streams
+		self.upstream = simpy.Store(env)
+		self.downstream = simpy.Store(env)
 
-		#0 to NUMBER_OF_RRHs-1
-		for i in range(self.num_RRHs):
-			self.upstream.append(simpy.Store(env))
-        
-        #for i in range(NUMBER_OF_RRHs):
-        #    self.downstream.append(simpy.Store(env))
+		self.pkt_uplink = env.process(self.pkt_uplink())
 
-	def up_latency(self, RRH_id,pkt,delay=0.1):
-		"""Calculates upstream propagation delay."""
-		yield self.env.timeout(delay)
-		self.upstream[RRH_id].put(pkt)
-		print "Time: %f. Pkt%d inside RRH%d buffer" % (self.env.now,pkt.id,RRH_id)
+	def set_vBBU_dict(self,vBBU_obj_dict):
+		self.vBBU_obj_dict = vBBU_obj_dict
 
-    # def down_latency(self, vBBU_id,delay=0.1):
-    #     """Calculates upstream propagation delay."""
-    #     yield self.env.timeout(delay)
-    #     self.downstream.put(vBBU_id)
+	def pkt_uplink(self):
+		while True:
+			pkt = yield self.upstream.get() # get pkt from a RRH of cell
+			# insert pkt in virtual vBBU port
+			self.vBBU_edge_obj_dict[pkt.rrh_id].UL_MID_buffer.put(pkt)
 
-	def put_UL(self, RRH_id,pkt,delay=0.1):
-		print "Time: %f. Sending pkt%d to SW" % (self.env.now,pkt.id)
-		self.env.process(self.up_latency(RRH_id,pkt,delay))
-
-	def get_UL(self,vBBU_id):
-		return self.upstream[vBBU_id].get()
-
-    # def put_DL(self, vBBU_id,delay=0.1):
-    #     self.env.process(self.down_latency(vBBU_id,delay))
-
-    # def get_DL(self,RRH_id):
-    #     return self.downstream[RRH_id].get()
-
+#this class being substituted by mid_phi_port one
+#we may remove this class in near future
 class MID_switch(object):
 	def __init__(self,env,NUMBER_OF_vBBUs):
 		self.env = env
 		self.num_vBBUs=NUMBER_OF_vBBUs
-		self.upstream = simpy.Store(env)
+		#self.upstream = simpy.Store(env)
+		self.upstream = []
 		#self.downstream = []
 		
 		# 0 to NUMBER_OF_RRHs-1
@@ -664,19 +664,31 @@ env = simpy.Environment()
 
 #static variables
 splitting_table=splits_info
-rrh_id = 0
 adist = 1
-cell_id=0
-num_RRHs=1
-edge_vBBU_id=0
-metro_vBBU_id=0
+num_cells = 1
+num_RRHs=2
+
 #instances
 #x = PacketGenerator(env, rrh_id, adist)
-FH_SW = FH_switch(env,num_RRHs)
+#FH_SW = FH_switch(env,num_RRHs)
 MID_SW = MID_switch(env,num_RRHs)
 
-metro_vbbu = metro_vBBU(env,metro_vBBU_id,splitting_table,MID_SW)
-edge_vbbu = edge_vBBU(env,edge_vBBU_id,splitting_table,FH_SW,MID_SW,metro_vBBU=metro_vbbu)
-RRH= RRH(env,cell_id,rrh_id,edge_vBBU_id,0,FH_SW)
+
+for cell_id in range(num_cells):
+	edge_vBBU_dict = {}
+	metro_vBBU_dict = {}
+	for vBBU_id in range(num_RRHs):
+		metro_vBBU_dict[vBBU_id] = Metro_vBBU(env,cell_id,vBBU_id,splitting_table,MID_SW)
+		edge_vBBU_dict[vBBU_id] = Edge_vBBU(env,cell_id,vBBU_id,splitting_table,MID_SW,metro_vBBU=metro_vBBU_dict[vBBU_id])
+
+	FH_phi_port_edge = FH_phi_port_edge_pool(env,cell_id,num_RRHs,edge_vBBU_dict)
+	#MID_phi_port_edge = MID_phi_port_edge_pool(env,num_RRHs,edge_vBBU_dict)
+	Edge_vBBU_Pool(env,cell_id,num_RRHs,edge_vBBU_dict,FH_phi_port_edge)
+
+	#MID_metro_phi_port = MID_phi_port_edge_pool(env,num_RRHs,edge_vBBU_dict)
+	#metro_vBBU_pool(env,cell_id,num_RRHs,edge_vBBU_dict)
+
+	for id in range(num_RRHs):
+		RRH(env,cell_id,id,id,0,FH_phi_port_edge)
 
 env.run(until=5)
