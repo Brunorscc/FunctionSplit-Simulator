@@ -234,41 +234,52 @@ for coding in range(0,29):
 # 
 
 class EdgeCloud(object):
-	def __init__ (self,env,n_vBBUs,num_cores):
+	def __init__ (self,env,n_vBBUs,FH_switch,MID_switch):
 		self.env=env
 		#self.baseline_energy=700	#from rodrigo's paper
-		self.AC_energy= num_cores * 100
-		self.battery_energy= num_cores *15
-		self.base_cores_energy= num_cores * 10
-		self.baseline_energy= AC_energy + battery_energy + base_cores_energy
+		self.AC_energy= n_vBBUs * 100
+		self.battery_energy= n_vBBUs *15
+		self.base_pool_energy= n_vBBUs * 10
+		self.baseline_energy= AC_energy + battery_energy + base_pool_energy
 
-		self.midhaul_receiver = self.env.process(self.EC_receiver())
-		#self.midhaul_sender =
+		self.FH_switch = FH_switch
+		self.MID_switch = MID_switch
+		
+		self.FH_receiver = self.env.process(self.FH_receiver())
+		self.MID_receiver = self.env.process(self.MID_receiver())
+		self.MID_sender = self.env.process(self.MID_sender())
 
 class CentralCloud(object):
-	def __init__(self,env,n_vBBUs,num_cores):
+	def __init__(self,env,n_vBBUs):
+		self.env=env
+		self.AC_energy= n_vBBUs * 50
+		self.battery_energy= n_vBBUs *10
+		self.base_pool_energy= n_vBBUs * 5
+		self.baseline_energy= AC_energy + battery_energy + base_pool_energy
+		#self.baseline_energy=550	#from rodrigo's paper
+
+class vBBU_FH_Port(object):
+    def __init__(self, env, qlimit=None):
+        self.buffer = simpy.Store(env) #buffer
+        self.env = env
+        self.out = None # vBBU port output to FH # FH_switch[RRH_id] Store
+        self.packets_rec = 0 #received pkt counter
+        self.packets_tx = 0 #tx pkt counter
+        self.packets_drop = 0 #dropped pkt counter
+        self.qlimit = qlimit #Buffer queue limit
+        self.byte_size = 0  # Current size of the buffer in bytes
+        self.action = env.process(self.run())  # starts the run() method as a SimPy process
+        self.pkt = None #network packet obj
+
+class Edge_vBBU_Pool(object):
+	def __init__(self,env,n_vBBUs):
 		self.env=env
 		self.AC_energy= num_cores * 50
 		self.battery_energy= num_cores *10
 		self.base_cores_energy= num_cores * 5
 		self.baseline_energy= AC_energy + battery_energy + base_cores_energy
-		#self.baseline_energy=550	#from rodrigo's paper
 
-# class vBBU_FH_Port(object):
-#     def __init__(self, env, qlimit=None):
-#         self.buffer = simpy.Store(env) #buffer
-#         self.env = env
-#         self.out = None # vBBU port output to FH # FH_switch[RRH_id] Store
-#         self.packets_rec = 0 #received pkt counter
-#         self.packets_tx = 0 #tx pkt counter
-#         self.packets_drop = 0 #dropped pkt counter
-#         self.qlimit = qlimit #Buffer queue limit
-#         self.byte_size = 0  # Current size of the buffer in bytes
-#         self.action = env.process(self.run())  # starts the run() method as a SimPy process
-#         self.pkt = None #network packet obj
-
-
-class vBBU(object):
+class vBBU(object): # PARENT CLASS
 	"""-------------- COMMENTS -------------
 	  Packets from RRHs of a cell arrive at the vBBU (only UPLINK modelled)
 	  Every BBU:
@@ -290,37 +301,70 @@ class vBBU(object):
 	 We consider RRHs to not shutdown for energy saving, they're always UP
 	-------------------------------------
 	"""
-	def __init__ (self,env,vBBU_id,splitting_table,FH_switch,GOPS=8000,CentralCloud=False):
+	def __init__ (self,env,vBBU_id,splitting_table,FH_switch,GOPS=8000):
 		self.env= env
 		self.id = vBBU_id
-		self.proc = simpy.Store(env)
 		self.splitting_table= splitting_table 	# defaultdict with bw&gops per split
 		self.GOPS= GOPS # every bbu is equal by default=8000GOPS
 
-		if CentralCloud:
-			self.core_dyn_energy=15	# energy of CPU, memory, hdd, mboard, etc of 1 core under 100% usage
-		else:
-			self.core_dyn_energy=30
-		self.split=7
-		#self.MID_port = 
-		self.FH_receiver = self.env.process(self.FH_receiver(FH_switch)) # get from FH_switch buffer
+class metro_vBBU(vBBU):
+	def __init__(self,env,vBBU_id,splitting_table,MID_switch,GOPS=8000,core_dyn_energy=15):
+		vBBU.__init__(self,env,vBBU_id,splitting_table,FH_switch,GOPS)
+		self.core_dyn_energy = core_dyn_energy
+		self.MID_switch = MID_switch
 		#self.MID_receiver = self.env.process(self.MID_receiver(MID_port))
 		#self.MID_sender = self.env.process(self.MID_sender(MID_port))
-		cpri_option=3
-		coding = 28
-		rrh_id=1
-		pkt_id=1
-		self.pkt= PacketCPRI(self.env.now,rrh_id,coding,cpri_option,pkt_id)
 
-	def FH_receiver(self,FH_switch):
-		"""process to get the packet from the FH_switch port buffer"""
-		while True:
-			print "Time: %f. BBU%d waiting for pkt in FH_Switch" % (self.env.now, self.id)
-			pkt= yield FH_switch.upstream[self.id].get()
-			
-			print "Time: %f. BBU%d sending packet to splitting process" % (self.env.now,self.id)
-			yield self.env.process(self.splitting(pkt))
+	def run(self,pkt):
+		yield self.env.process(self.splitting(pkt))
 
+	def splitting(self,pkt):
+		print "METRO CLOUD"
+		print "Coding: %d" % pkt.coding
+		print "CPRI_OPTION %d" % pkt.CPRI_option
+		print "RRH ID %s " % pkt.rrh_id
+		print "Split: %d" % pkt.split
+		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
+		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
+		
+		if pkt.split == 7: # if C-RAN split send everything to MetroCloud
+			print "Split 7. Pkt already processed. Nothing to do"
+			return
+
+		#by the packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
+		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['metro_gops']
+		print "METRO GOPS split: %d" % GOPS
+		#print "Self gops %d" % self.GOPS
+		#bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][7]['bw'])/1000
+		#print "BW pkt split: %f Mb" % bw_split
+		#timeout proc
+		proc_tout = float(GOPS)/self.GOPS
+		print "METRO Proc Timeout %f" % proc_tout
+		energy = (float(proc_tout) * (self.core_dyn_energy))/1000 #== measured in 1ms instead of 1s
+		print "METRO Energy consumption: %f W" % energy
+		yield self.env.timeout(proc_tout)
+		print "METRO After t_out. Time now= %f" % self.env.now
+		
+		# send pkt to core network (for us it means destroying it)
+		del pkt
+
+		# LOG the proc energy usage
+		#energy_file.write( "{},{},{},{},{},{},{},{}\n".format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
+
+
+class edge_vBBU(vBBU):
+	def __init__(self,env,vBBU_id,splitting_table,FH_switch,MID_switch,metro_vBBU=None,GOPS=8000,core_dyn_energy=30):
+		vBBU.__init__(self,env,vBBU_id,splitting_table,FH_switch,GOPS)
+		self.core_dyn_energy = core_dyn_energy
+		self.metro_vBBU = metro_vBBU #temporary testing var
+		self.split=2 # variable not in metro_vbbu, because after edgesplit the pkt gets variable split
+		self.FH_phi_port = FH_phi_port_edge_pool()
+		self.FH_switch = FH_switch
+		self.MID_switch = MID_switch
+		self.FH_receiver = self.env.process(self.FH_receiver()) # get from FH_switch buffer
+		
+		#self.MID_receiver = self.env.process(self.MID_receiver(MID_port))
+		#self.MID_sender = self.env.process(self.MID_sender(MID_port))
 
 	def set_split(self,split):
 		self.split=split
@@ -328,11 +372,17 @@ class vBBU(object):
 	def run(self,pkt):
 		yield self.env.process(self.splitting(pkt))
 
+	def FH_receiver(self):
+		"""process to get the packet from the FH_switch port buffer"""
+		while True:
+			print "Time: %f. BBU%d waiting for pkt in FH_Switch" % (self.env.now, self.id)
+			#pkt= yield self.FH_switch.upstream[self.id].get()
+			pkt= yield self.FH_port.buffer.get()
+			
+			print "Time: %f. BBU%d sending packet to splitting process" % (self.env.now,self.id)
+			yield self.env.process(self.splitting(pkt))
 
 	def splitting(self,pkt):
-		# take gops from our big dict
-		#codingpkt[]
-		#coding=
 		print "Coding: %d" % pkt.coding
 		print "CPRI_OPTION %d" % pkt.CPRI_option
 		print "RRH ID %s " % pkt.rrh_id
@@ -341,9 +391,10 @@ class vBBU(object):
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
 		
 		if self.split == 1: # if C-RAN split send everything to MetroCloud
-			print "Split 1. Send pkt to metroCloud."
+			print "Split 1. Send pkt straight to metroCloud."
 			# send pkt to Metro
 			return
+
 		#by packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
 		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['edge_gops']
 		print "GOPS: %d" % GOPS
@@ -353,12 +404,18 @@ class vBBU(object):
 		#timeout proc
 		proc_tout = float(GOPS)/self.GOPS
 		print "Proc Timeout %f" % proc_tout
-		energy = float(proc_tout) * (self.core_dyn_energy) # /1000 == measured in 1ms instead of 1s
+		energy = (float(proc_tout) * (self.core_dyn_energy))/1000 # == measured in 1ms instead of 1s
 		print "Energy consumption: %f W" % energy
 		yield self.env.timeout(proc_tout)
 		print "After t_out. Time now= %f" % self.env.now
+		pkt.size= bw_split
+		pkt.split=self.split
+		
+		bla = self.env.process(self.metro_vBBU.splitting(pkt))
+		yield bla
+		
 		#TODO:
-		# send rest to metrocloud midhaul
+		# send pkt to metrocloud midhaul
 
 		# LOG the proc energy usage
 		#energy_file.write( "{},{},{},{},{},{},{},{}\n".format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
@@ -501,14 +558,40 @@ class RRHPort(object):
             self.byte_size = tmp
             self.buffer.put(pkt)
 
+class FH_phi_port_edge_pool(object):
+	def __init__(self,env,NUMBER_OF_RRHs,vBBU_obj_dict):
+		self.env = env
+		self.vBBU_obj_dict = vBBU_obj_dict
+		self.num_RRHs=NUMBER_OF_RRHs
+		
+		# lets consider there's only a single physical port from cell to vBBU pool.
+		self.upstream = simpy.Store(env)
+		#self.downstream = []
+
+		self.action = env.process(self.FH_to_vBBU())
+        
+        #for i in range(NUMBER_OF_RRHs):
+        #    self.downstream.append(simpy.Store(env))
+
+    def set_vBBU_dict(self,vBBU_obj_dict):
+    	self.vBBU_obj_dict = vBBU_obj_dict
+
+    def FH_to_vBBU(self):
+    	while True:
+	    	pkt = yield self.upstream.get() # get pkt from a RRH of cell
+	    	# insert pkt in virtual vBBU port
+	    	self.vBBU_obj_dict[pkt.rrh_id].buffer.put(pkt)
+
 class FH_switch(object):
 	def __init__(self,env,NUMBER_OF_RRHs):
 		self.env = env
+		self.vBBU_obj_dict = vBBU_obj_dict
 		self.num_RRHs=NUMBER_OF_RRHs
-		self.upstream = []
-		#self.downstream = []
 		
-		# 0 to NUMBER_OF_RRHs-1
+		#self.downstream = []
+		self.upstream = []
+
+		#0 to NUMBER_OF_RRHs-1
 		for i in range(self.num_RRHs):
 			self.upstream.append(simpy.Store(env))
         
@@ -539,6 +622,43 @@ class FH_switch(object):
     # def get_DL(self,RRH_id):
     #     return self.downstream[RRH_id].get()
 
+class MID_switch(object):
+	def __init__(self,env,NUMBER_OF_vBBUs):
+		self.env = env
+		self.num_vBBUs=NUMBER_OF_vBBUs
+		self.upstream = simpy.Store(env)
+		#self.downstream = []
+		
+		# 0 to NUMBER_OF_RRHs-1
+		for i in range(self.num_vBBUs):
+			self.upstream.append(simpy.Store(env))
+        
+        #for i in range(NUMBER_OF_RRHs):
+        #    self.downstream.append(simpy.Store(env))
+
+	def up_latency(self, RRH_id,pkt,delay=0.1):
+		"""Calculates upstream propagation delay."""
+		yield self.env.timeout(delay)
+		self.upstream[RRH_id].put(pkt)
+		print "Time: %f. Pkt%d inside RRH%d buffer" % (self.env.now,pkt.id,RRH_id)
+
+    # def down_latency(self, vBBU_id,delay=0.1):
+    #     """Calculates upstream propagation delay."""
+    #     yield self.env.timeout(delay)
+    #     self.downstream.put(vBBU_id)
+
+	def put_UL(self, RRH_id,pkt,delay=0.1):
+		print "Time: %f. Sending pkt%d to SW" % (self.env.now,pkt.id)
+		self.env.process(self.up_latency(RRH_id,pkt,delay))
+
+	def get_UL(self,vBBU_id):
+		return self.upstream[vBBU_id].get()
+
+    # def put_DL(self, vBBU_id,delay=0.1):
+    #     self.env.process(self.down_latency(vBBU_id,delay))
+
+    # def get_DL(self,RRH_id):
+    #     return self.downstream[RRH_id].get()
 
 env = simpy.Environment()
 
@@ -548,11 +668,15 @@ rrh_id = 0
 adist = 1
 cell_id=0
 num_RRHs=1
-vBBU_id=0
-
+edge_vBBU_id=0
+metro_vBBU_id=0
 #instances
-FH_SW = FH_switch(env,num_RRHs)
 #x = PacketGenerator(env, rrh_id, adist)
-bbu = vBBU(env,vBBU_id,splitting_table,FH_SW)
-RRH= RRH(env,cell_id,rrh_id,vBBU_id,0,FH_SW)
+FH_SW = FH_switch(env,num_RRHs)
+MID_SW = MID_switch(env,num_RRHs)
+
+metro_vbbu = metro_vBBU(env,metro_vBBU_id,splitting_table,MID_SW)
+edge_vbbu = edge_vBBU(env,edge_vBBU_id,splitting_table,FH_SW,MID_SW,metro_vBBU=metro_vbbu)
+RRH= RRH(env,cell_id,rrh_id,edge_vBBU_id,0,FH_SW)
+
 env.run(until=5)
