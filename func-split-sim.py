@@ -92,8 +92,8 @@ CPRI={\
 splits_info = defaultdict( lambda: defaultdict( lambda: defaultdict( lambda: defaultdict(float))))
 
 # Multilevel nested dict \/
-# >>> nested_dict = lambda: defaultdict(nested_dict)
-# >>> nest = nested_dict()
+# nested_dict = lambda: defaultdict(nested_dict)
+# nest = nested_dict()
 
 for coding in range(0,29):
 	for cpri_option in used_CPRIs:
@@ -105,7 +105,6 @@ for coding in range(0,29):
 		# 	IP pkt TTI
 
 		#print "Coding: %d 	CPRI OPTION: %d" % (coding,cpri_option)
-		# print tbs_table[n_RB - PUCCH_RBs][mcs_2_tbs[MCS_UL]]
 		TBS_UL = tbs_table[CPRI[cpri_option]['PRB'] - PUCCH_RBs][mcs_2_tbs[MCS_UL]]
 		#print "TBS: %.3f" % TBS_UL
 		
@@ -114,22 +113,19 @@ for coding in range(0,29):
 		#--------------------------------------------
 
 
-		#--------------SPLITS BW & GOPS calcs--------
-		# PHY SPLIT IV - SCF
+		#--------------BW & GOPS CALCS---------------
+		# SPLIT 1 -> PHY SPLIT IV - SCF
 		a1_UL = nIQ * CPRI_coding
 		r1_UL= CPRI[cpri_option]['Fs'] * nAnt * n_Sector * a1_UL
 		# nIQ= (2*(15+1))= 32 -> facilita aproximacao nas contas
-		# (2*IQ) * Fs * 16/15 * CPRIlinecoding * nAnt * nSectors
-		# (2 * 15) * 1.92 * 16/15 * (10/8.0) * 2 * 4 = 614.39999
 		split1=1
 		splits_info[coding][cpri_option][1]['bw'] = r1_UL
 		
 		gops_1 = int((cpri_option*nAnt*n_Sector*a1_UL)/10)
 		splits_info[coding][cpri_option][1]['gops'] = gops_1
 		#print "Split1 : %.3f Mbps	GOPS:%d |" % (r1_UL, gops_1),
-		#return r1_UL
 
-		# PHY SPLIT IIIb - SCF
+		# SPLIT 2 -> PHY SPLIT IIIb - SCF
 		a2_UL= nIQ
 		r2_UL= CPRI[cpri_option]['Fs'] * nAnt * n_Sector * a2_UL
 		splits_info[coding][cpri_option][2]['bw'] = r2_UL
@@ -137,21 +133,16 @@ for coding in range(0,29):
 		gops_2 = int((cpri_option*nAnt*n_Sector*a2_UL*nIQ)/100)
 		splits_info[coding][cpri_option][2]['gops'] = gops_2
 		#print "Split2 : %.3f Mbps  GOPS:%d |" % (r2_UL,gops_2)
-		#return r2_UL
-	#	if split==3:
-		
-		# PHY SPLIT III - SCF
+				
+		# SPLIT 3 -> PHY SPLIT III - SCF
 		a3_UL = n_RB_SC * n_Data_Sym * nIQ # <- *1000 / 1000000
 		r3_UL = (a3_UL * nAnt * n_Sector * CPRI[cpri_option]['PRB'])/1000
 		gops_3 = int(r3_UL/10)
 		splits_info[coding][cpri_option][3]['bw'] = r3_UL
 		splits_info[coding][cpri_option][3]['gops'] = gops_3
 		#print "Split3 : %.3f Mbps	GOPS:%d |" % (r3_UL,gops_3),
-		#return r3_UL
-	#	if split==4:
-		# PHY SPLIT II - SCF
-		#a4_UL = n_RB_SC * n_Data_Sym * nIQ
-		#b4_UL = n_RB_SC * n_Data_Sym * PUCCH_RBs * nIQ * nIQ
+
+		#SPLIT 4 -> PHY SPLIT II - SCF
 		r4_UL = (n_Data_Sym * n_RB_SC * (CPRI[cpri_option]['PRB'] - PUCCH_RBs) * nAnt * nIQ)/1000
 		splits_info[coding][cpri_option][4]['bw'] = r4_UL
 
@@ -160,48 +151,42 @@ for coding in range(0,29):
 		
 		splits_info[coding][cpri_option][4]['gops'] = gops_4
 		#print "Split4 : %.3f Mbps   GOPS:%d |" % (r4_UL, gops_4)
-		#return r4_UL
 
-	#	if split==5:
-		# PHY SPLIT I - SCF
-		#a5_UL = (n_RB_SC * n_Data_Sym * QmPUSCH * LayersUL * nSIC * nLLR) / 1000
-		#b5_UL = (PUCCH_RBs * n_RB_SC * n_Data_Sym * QmPUSCH * LayersUL * nSIC * nLLR ) / 1000
-		#r5_UL = a5_UL * LayersUL * n_RB - b5_UL
+		# SPLIT 5 -> PHY SPLIT I - SCF
 		r5_UL = (n_Data_Sym * n_RB_SC * (CPRI[cpri_option]['PRB'] - PUCCH_RBs) * QmPUSCH * LayersUL * nSIC * nLLR) / 1000
 		if coding > 3: 
 			gops_5= int((gops_4) * (coding**2/(1+coding+(coding*math.sqrt(coding)))))
-		else:
-			gops_5= int(gops_4)
+		else: #  In coding <= 3, split 5 has lower gops than split 4 
+			gops_5= int(gops_4) #lower limit is equal to split 4
 		splits_info[coding][cpri_option][5]['gops'] = gops_5
 		splits_info[coding][cpri_option][5]['bw'] = r5_UL
 		#print "Split5 : %.3f Mbps 	GOPS:%d | " % (r5_UL, gops_5),
-		#return r5_UL
 
-	#	if split==6:
-		# SPLIT MAC-PHY - SCF
+		# SPLIT 6 -> SPLIT MAC-PHY - SCF
 		a6_UP = (IP_TTI_UL* (IPpkt + HdrPDCP + HdrRLC + HdrMAC) * nTBS_UL_TTI)/ 125
 		r6_UL = a6_UP * LayersUL + FAPI_UL
 		gops_6 = int(a6_UP*LayersUL)
 		splits_info[coding][cpri_option][6]['bw'] = r6_UL
 		splits_info[coding][cpri_option][6]['gops'] = gops_6
 		#print "Split6 : %.3f Mbps	GOPS:%d |" % (r6_UL,gops_6)
-		#return r6_UP
 
-	#	if split==7:
-		# SPLIT RRC-PDCP - SCF
+		# SPLIT 7 -> SPLIT RRC-PDCP - SCF
 		a7_UP = (IP_TTI_UL * IPpkt * nTBS_UL_TTI) / 125
 		r7_UL = a7_UP * LayersUL
-		# GOPS calcula o custo de processar a funcao, mas a funcao virtual 7 nao existe para nos
-		#gops_7 = int(a7_UP * LayersUL)
+		# GOPS calculates the processing cost of a function, but function 7 doesn't exist for us
+		# gops_7 = int(a7_UP * LayersUL) # legacy calcs for gops_7
 		gops_7 = 0
-		splits_info[coding][cpri_option][7]['bw'] = r7_UL
+		# BW in split 7 can also be approximated by TBS/1000.0
+		splits_info[coding][cpri_option][7]['bw'] = r7_UL 
 		splits_info[coding][cpri_option][7]['gops'] = gops_7
-		# OU apenas fazer TBS/1000.0 ...
+		#########
+
+		# Total GOPS of coding and CPRI_option 
 		GOPS_total= gops_1+gops_2+gops_3+gops_4+gops_5+gops_6+gops_7
 		splits_info[coding][cpri_option]['gops_total']= GOPS_total
-
 		#print "Split7 : %.3f Mbps	GOPS:%d 	GOPS TOTAL Split1:%d|\n" % (r7_UL,gops_7,GOPS_total)
 
+		# measuring edge and metro gops for each split in each coding and cpri option
 		for split in range(1,8):
 			edge_gops=0
 			if split > 1:
@@ -214,27 +199,62 @@ for coding in range(0,29):
 				for metro_split in range(split,7):
 					metro_gops+= splits_info[coding][cpri_option][metro_split]['gops']
 			splits_info[coding][cpri_option][split]['metro_gops']= metro_gops
-
-		#return r7_UP
-		#----------------------------------------
+		#-----------------END OF BW AND GOPS CALCS ----------------------- 
 
 #print dict(splits_info)
 
-# TO PRINT DEFAULT DICT \/
+# BETTER PRINT OF DEFAULT DICT \/
 #import json
 #data_as_dict = json.loads(json.dumps(splits_info, indent=4))
 #print(data_as_dict)
 
 # splits_info[MCS][CPRI option][Split]
 #for cada in range(1,8):
-#	print splits_info[28][1][cada]
+#	print splits_info[28][1][cada] 
 
-#print({k: dict(v) for k, v in dict(group_ids).items()})
+#-----------CLASSES AND SIMULATOR-------------
+
+class Orchestrator(object):
+	def __init__ (self,env,n_vBBUs,splitting_table,MID_port,edge_vBBU_pool_obj,\
+				  fix_coding,interval=1001,threshold=0.03,multiplexing_rate=2):
+		self.env=env
+		self.interval = interval
+		self.fix_coding = fix_coding
+		self.n_vBBUs = n_vBBUs
+		self.splitting_table = splitting_table
+		self.MID_port = MID_port
+		self.threshold = threshold
+
+		# meanwhile: only a list with vbbus of 1 cell and direct obj updts
+		self.edge_vBBU_pool_obj = edge_vBBU_pool_obj
+
+		self.MID_max_bw = self.MID_port.max_bw
+		self.max_bw_1_split = splitting_table[coding][7]['bw']
+		self.bw_max_cost= self.max_bw_1_split * len(edge_vBBU_pool_obj)
+		
+		self.multiplexing_rate = 2 # baseline desired multiplexing rate #may not be used
+		self.actual_multiplexing = 2
+		self.last_multiplexing = 2
+		self.bw_use = 0
+		self.last_bw_use = 0
+		
+		self.read_metrics = self.env.process(self.read_metrics())
 
 
-# campos do pacote CPRI
-# list[antenaIDs], setor=2*qtd antenas, 
-# 
+	def read_metrics(self):
+		# wait interval to gather metrics
+		yield self.env.timeout(self.interval)
+		
+		# read amount of bytes dropped in midhaul
+		bytes_drop = self.last_UL_byte_drops
+		# default threshold is a max of 3% losses in order to trigger splitting updt 
+		if (bytes_drop/self.MID_port.max_bw) > self.threshold:
+			self.splitting_updt()
+
+	def splitting_updt(self):
+		pass
+
+		
 
 class Edge_Cloud(object):
 	def __init__ (self,env,n_vBBUs,FH_switch,MID_switch):
@@ -363,22 +383,22 @@ class Metro_vBBU(vBBU):
 	def MID_receiver(self):
 		"""process to get the packet from the FH_switch port buffer"""
 		while True:
-			print "Time: %f. METRO vBBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
+			#print "Time: %f. METRO vBBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
 			#pkt= yield self.FH_switch.upstream[self.id].get()
 			#pkt= yield self.FH_port.buffer.get()
 			pkt = yield self.UL_buffer.get()
 			
-			print "Time: %f. METRO vBBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
+			#print "Time: %f. METRO vBBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
 			yield self.env.process(self.splitting(pkt))
 
 
 	def splitting(self,pkt):
-		print "METRO CLOUD"
-		print "Coding: %d" % pkt.coding,
-		print "CPRI_OPTION %d" % pkt.CPRI_option,
-		print "RRH ID %s " % pkt.rrh_id,
-		print "Split: %d" % pkt.split
-		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
+		# print "METRO CLOUD"
+		# print "Coding: %d" % pkt.coding,
+		# print "CPRI_OPTION %d" % pkt.CPRI_option,
+		# print "RRH ID %s " % pkt.rrh_id,
+		# print "Split: %d" % pkt.split
+		# #pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
 		
 		if pkt.split == 7: # if C-RAN split send everything to MetroCloud
@@ -388,17 +408,17 @@ class Metro_vBBU(vBBU):
 
 		#by the packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
 		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['metro_gops']
-		print "METRO GOPS split: %d" % GOPS
+		#print "METRO GOPS split: %d" % GOPS
 		#print "Self gops %d" % self.GOPS
 		#bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][7]['bw'])/1000
 		#print "BW pkt split: %f Mb" % bw_split
 		#timeout proc
 		proc_tout = float(GOPS)/self.GOPS
-		print "METRO Proc Timeout %f" % proc_tout
+		#print "METRO Proc Timeout %f" % proc_tout
 		energy = (float(proc_tout) * (self.core_dyn_energy))/1000 #== measured in 1ms instead of 1s
-		print "METRO Energy consumption: %f W" % energy
+		#print "METRO Energy consumption: %f W" % energy
 		yield self.env.timeout(proc_tout)
-		print "METRO After t_out. Time now= %f" % self.env.now
+		#print "METRO After t_out. Time now= %f" % self.env.now
 		
 		# send pkt to core network (for us it means destroying it)
 		del pkt
@@ -409,11 +429,10 @@ class Metro_vBBU(vBBU):
 
 
 class Edge_vBBU(vBBU):
-	def __init__(self,env,cell_id,vBBU_id,splitting_table,metro_vBBU=None,GOPS=8000,core_dyn_energy=30):
+	def __init__(self,env,cell_id,vBBU_id,splitting_table,GOPS=8000,core_dyn_energy=30):
 		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS)
 		self.core_dyn_energy = core_dyn_energy
-		self.metro_vBBU = metro_vBBU #temporary testing var
-		self.split=2 # variable not in metro_vbbu, because after edgesplit the pkt gets variable split
+		self.split=1 # variable not in metro_vbbu, because after edgesplit the pkt gets variable split
 		self.UL_buffer = simpy.Store(self.env)
 
 		self.MID_port = None
@@ -424,7 +443,7 @@ class Edge_vBBU(vBBU):
 		self.FH_receiver = self.env.process(self.FH_receiver()) # get from FH_switch buffer
 		
 		#self.MID_receiver = self.env.process(self.MID_receiver(MID_port))
-		#self.MID_sender = self.env.process(self.MID_sender(MID_port))
+		
 
 	def set_split(self,split):
 		self.split=split
@@ -432,50 +451,47 @@ class Edge_vBBU(vBBU):
 	def FH_receiver(self):
 		"""process to get the packet from the FH_switch port buffer"""
 		while True:
-			print "Time: %f. BBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
+			#print "Time: %f. BBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
 			#pkt= yield self.FH_switch.upstream[self.id].get()
 			#pkt= yield self.FH_port.buffer.get()
 			pkt = yield self.UL_buffer.get()
 			
-			print "Time: %f. BBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
+			#print "Time: %f. BBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
 			yield self.env.process(self.splitting(pkt))
 
 	def splitting(self,pkt):
-		print "Coding: %d" % pkt.coding,
-		print "CPRI_OPTION %d" % pkt.CPRI_option,
-		print "RRH ID %s " % pkt.rrh_id,
-		print "Split: %d" % self.split
+		#print "Coding: %d" % pkt.coding,
+		#print "CPRI_OPTION %d" % pkt.CPRI_option,
+		#print "RRH ID %s " % pkt.rrh_id,
+		#print "Split: %d" % self.split
 		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
-		
-		if self.split == 1: # if C-RAN split send everything to MetroCloud
-			print "Split 1. Send pkt straight to metroCloud."
+		pkt.split=self.split
+		if pkt.split == 1: # if C-RAN split send everything to MetroCloud
+			#print "Split 1. Send pkt straight to metroCloud."
 			# send pkt to Metro
+			self.MID_port.upstream.put(pkt)
 			return
 
 		#by packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
 		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['edge_gops']
-		print "GOPS: %d" % GOPS,
-		print "Self gops %d" % self.GOPS
+		#print "GOPS: %d" % GOPS,
+		#print "Self gops %d" % self.GOPS
 		bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['bw'])/1000
-		print "BW pkt split: %f Mb" % bw_split,
+		#print "BW pkt split: %f Mb" % bw_split,
 		#timeout proc
 		proc_tout = float(GOPS)/self.GOPS
-		print "Proc Timeout %f" % proc_tout,
+		#print "Proc Timeout %f" % proc_tout,
 		energy = (float(proc_tout) * (self.core_dyn_energy))/1000 # == measured in 1ms instead of 1s
-		print "Energy consumption: %f W" % energy
+		#print "Energy consumption: %f W" % energy
 		yield self.env.timeout(proc_tout)
-		print "After t_out. Time now= %f" % self.env.now
+		#print "After t_out. Time now= %f" % self.env.now
 		pkt.size= bw_split
-		pkt.split=self.split
-		
-		#bla = self.env.process(self.metro_vBBU.splitting(pkt))
-		#yield bla
 		
 		# send pkt to phi port (midhaul)
-		print "Sending to Phi Midhaul"
+		#print "Sending to Phi Midhaul"
 		self.MID_port.upstream.put(pkt)
-		print "Sent"
+		#print "Sent"
 
 		# LOG the proc energy usage
 		#energy_file.write( "{},{},{},{},{},{},{},{}\n".\
@@ -522,11 +538,11 @@ class Packet_Generator(object):
             # wait for next transmission
             yield self.env.timeout(self.arrivals_dist)
             self.packets_sent += 1
-            print "New packet generated at %f" % self.env.now
+            #print "New packet generated at %f" % self.env.now
     
             p = Packet_CPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id)
             #time,rrh_id, coding, CPRI_option, id, src="a"
-            print p
+            #print p
             #Logging
             #pkt_file.write("{}\n".format(self.fix_pkt_size))
             self.out.put(p)
@@ -606,11 +622,11 @@ class RRH_Port(object):
         """
 
         self.packets_rec += 1
-        print "+1 RRHPort pkt. Packets received: %d" % self.packets_rec
+        #print "+1 RRHPort pkt. Packets received: %d" % self.packets_rec
         #pkt.size = (splits_info[pkt.coding][pkt.CPRI_option][1]['bw'])/1000
-        print "Pkt size: %f" % pkt.size
+        #print "Pkt size: %f" % pkt.size
         tmp = self.byte_size + pkt.size
-        print "RRHPort buffer size: %f"  % tmp
+        #print "RRHPort buffer size: %f"  % tmp
         if self.qlimit is None: #checks if the queue size is unlimited
             self.byte_size = tmp
             return self.buffer.put(pkt)
@@ -623,28 +639,30 @@ class RRH_Port(object):
 
 class Phi_port_pool(object):
 	def __init__(self,env,cell_id,NUMBER_OF_RRHs,UL_vBBU_obj_dict,DL_vBBU_obj_dict=None,\
-				 UL_max_bw=None,DL_max_bw=None, bw_check_interval=1000):
+				 max_bw=None, bw_check_interval=1000):
 		self.env = env
 		self.cell_id = cell_id
 		self.DL_vBBU_obj_dict = DL_vBBU_obj_dict
 		self.UL_vBBU_obj_dict = UL_vBBU_obj_dict
 		self.num_RRHs=NUMBER_OF_RRHs
 		
-		self.UL_max_bw = UL_max_bw
-		self.DL_max_bw = DL_max_bw
+		self.max_bw = max_bw
+		if max_bw is not None:
+			self.UL_bw_interval = max_bw
+			self.DL_bw_interval = max_bw
 		self.bw_check_interval = bw_check_interval # default 1 seg = 1000ms
 		
 		# metrics UL
 		self.UL_pkt_rx = 0
 		self.UL_pkt_tx = 0
-		self.UL_pkt_error = 0
+		self.UL_pkt_errors = 0
 		self.UL_pkt_drops = 0
 		self.UL_buffer_size = 0
 		self.UL_byte_count = 0
 		# DL
 		self.DL_pkt_rx = 0
 		self.DL_pkt_tx = 0
-		self.DL_pkt_error = 0
+		self.DL_pkt_errors = 0
 		self.DL_pkt_drops = 0
 		self.DL_buffer_size = 0
 		self.DL_byte_count = 0
@@ -659,7 +677,25 @@ class Phi_port_pool(object):
 			self.pkt_downlink = env.process(self.pkt_downlink())
 
 		# TODO: check for max BW
-		#self.bw_check = env.process(self.bw_ckeck())
+		if max_bw is not None:
+			self.bw_check = env.process(self.bw_check())
+
+	def bw_check(self):
+		while True:
+			yield self.env.timeout(self.bw_check_interval)
+			UL_bytes_requested = self.max_bw - self.UL_bw_interval
+			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_pkt_rx,UL_bytes_requested)
+			print "UL pkt drops: %d.  pkt errors: %d " % (self.UL_pkt_drops, self.UL_pkt_errors)
+			print "UL tx: %d pkts and %.3f Mbps\n" % (self.UL_pkt_tx, self.UL_byte_count)
+
+			self.last_UL_pkt_drops = self.UL_pkt_drops
+			self.last_UL_byte_drops = UL_bytes_requested - self.UL_byte_count
+			#
+			self.UL_bw_interval = self.max_bw
+			self.DL_bw_interval = self.max_bw
+			# zeroing counters
+			self.UL_pkt_rx = self.UL_pkt_tx = self.UL_byte_count = \
+			self.UL_pkt_drops = self.UL_pkt_errors = 0
 
 	def set_edge_ctrl(self,edge_ctrl):
 		self.edge_ctrl = edge_ctrl
@@ -673,10 +709,25 @@ class Phi_port_pool(object):
 	def pkt_uplink(self):
 		while True:
 			pkt = yield self.upstream.get() # get pkt from a RRH of cell
+			self.UL_pkt_rx +=1
+			if self.max_bw is not None:
+				self.UL_bw_interval -= pkt.size
+			 	if self.UL_bw_interval < 0:
+					#print "TIME: %f. WARNING: Pkt UL BLOCK!" % self.env.now
+					self.UL_pkt_drops +=1
+
+					del pkt
+				else:
+					self.UL_vBBU_obj_dict[pkt.rrh_id].UL_buffer.put(pkt)
+					self.UL_byte_count += pkt.size
+					self.UL_pkt_tx +=1
 			# insert pkt in virtual vBBU port
 			#print "TESTEEEEEEEEEE"
-			#print self.UL_vBBU_obj_dict[pkt.rrh_id]
-			self.UL_vBBU_obj_dict[pkt.rrh_id].UL_buffer.put(pkt)
+			else:
+				#print self.UL_vBBU_obj_dict[pkt.rrh_id]
+				self.UL_vBBU_obj_dict[pkt.rrh_id].UL_buffer.put(pkt)
+				self.UL_byte_count += pkt.size
+				self.UL_pkt_tx +=1
 
 	def pkt_downlink(self):
 		while True:
@@ -707,7 +758,7 @@ for cell_id in range(num_cells):
 		edge_vBBU_dict[vBBU_id] = Edge_vBBU(env,cell_id,vBBU_id,splitting_table)
 
 	FH_phi_port = Phi_port_pool(env,cell_id,num_RRHs,edge_vBBU_dict)
-	MID_phi_port = Phi_port_pool(env,cell_id,num_RRHs,metro_vBBU_dict,edge_vBBU_dict)
+	MID_phi_port = Phi_port_pool(env,cell_id,num_RRHs,metro_vBBU_dict,edge_vBBU_dict,max_bw=1000)
 	
 	Edge_vBBU_Pool(env,cell_id,num_RRHs,edge_vBBU_dict,MID_phi_port)
 	Metro_vBBU_Pool(env,cell_id,num_RRHs,metro_vBBU_dict,MID_phi_port)
@@ -715,4 +766,4 @@ for cell_id in range(num_cells):
 	for id in range(num_RRHs):
 		RRH(env,cell_id,id,id,0,FH_phi_port)
 
-env.run(until=5)
+env.run(until=3001)
