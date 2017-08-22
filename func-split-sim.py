@@ -9,6 +9,7 @@ from collections import defaultdict
 import os 
 import math
 from itertools import izip
+from operator import itemgetter
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 """ For cloudified C-RAN architecture see 'Radio Base Stations in the Cloud' paper """
@@ -216,21 +217,27 @@ for coding in range(0,29):
 
 class Orchestrator(object):
 	def __init__ (self,env,n_vBBUs,splitting_table,MID_port,edge_vBBU_pool_obj,\
-				  fix_coding,interval=1001,threshold=0.03,multiplexing_rate=2):
+				  fix_coding,interval=1002,thold_updt=0.03,multiplexing_rate=2,reduce_percnt=1.3):
 		self.env=env
 		self.interval = interval
 		self.fix_coding = fix_coding
 		self.n_vBBUs = n_vBBUs
+		self.vBBU_splits={}
+		for cada in range(n_vBBUs):
+			self.vBBU_splits[cada] = 1
 		self.splitting_table = splitting_table
 		self.MID_port = MID_port
-		self.threshold = threshold
+		self.thold_updt = thold_updt
+		self.reduce_percnt = reduce_percnt
 
 		# meanwhile: only a list with vbbus of 1 cell and direct obj updts
 		self.edge_vBBU_pool_obj = edge_vBBU_pool_obj
 
 		self.MID_max_bw = self.MID_port.max_bw
-		self.max_bw_1_split = splitting_table[coding][7]['bw']
-		self.bw_max_cost= self.max_bw_1_split * len(edge_vBBU_pool_obj)
+		self.max_bw_1_split = self.splitting_table[coding][7][1]['bw']
+		self.min_bw_1_split = self.splitting_table[coding][1][7]['bw']
+		#print self.max_bw_1_split
+		self.bw_max_cost = self.max_bw_1_split * len(edge_vBBU_pool_obj)
 		
 		self.multiplexing_rate = 2 # baseline desired multiplexing rate #may not be used
 		self.actual_multiplexing = 2
@@ -238,23 +245,105 @@ class Orchestrator(object):
 		self.bw_use = 0
 		self.last_bw_use = 0
 		
+		# add UL entry at MID switch to enable edge_pools communication 
+		# for now only one mid switch
+		#for cada in MID_phi_ports: 
+		self.MID_port.add_UL_entry('orchestrator',self)
+
+
+		#self.metrics_dict = {}
 		self.read_metrics = self.env.process(self.read_metrics())
 
+	def splitting_updt(self,phi_metrics,vbbu_metrics):
+		# total phi drops
+		splitted = False
+		phi_bytes_drops = phi_metrics['UL_bytes_drops']
+		reduced_bw = 0
+		print "----- ORCHESTRATOR ------"
+		#aux_vBBU_splits = dict(self.vBBU_splits) # auxiliary split dict during splitting updt
+		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
+		
+		# ordered list of most drops on a vBBU
+		dropper_list = []
+		list_pos = ()
+		#print "VBBU_metrics"
+		#print vbbu_metrics
+		for cada in vbbu_metrics:
+			list_pos = (cada,vbbu_metrics[cada]['UL_bytes_drops'])
+			dropper_list.append(list_pos)
+		#list_pos = (1,1300)
+		#dropper_list.append(list_pos)
+
+		# ordered list
+		dropper_list.sort(key=itemgetter(1))
+		#print "Dropper list"
+		#print dropper_list
+		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
+		cpri_option = 3
+		#TODO: Consider energy in calcs
+
+		# get most droppers and change their split until around 10% under maximum bw of MID
+		for vbbu in vbbu_metrics:
+			#print "Reduced bw: %f" % reduced_bw
+			if reduced_bw < phi_bytes_drops*self.reduce_percnt:
+				vbbu_tuple = dropper_list.pop()
+				# get actual vbbu split
+				vbbu_split = self.vBBU_splits[vbbu_tuple[0]]
+				#print "vbbu_split: %d" % vbbu_split
+				bw_vbbu_split = self.splitting_table[self.fix_coding][cpri_option][vbbu_split]['bw']
+				
+				# difference between actual split and split 7 to actual split
+				for split in range(vbbu_split+1,7+1)[::-1]:
+					bw_split = self.splitting_table[self.fix_coding][cpri_option][split]['bw']
+					# difference between splits
+					diff_bw = bw_vbbu_split - bw_split
+					
+					#print "Reduced bw: %f" % reduced_bw
+					# add 
+					changed_vBBU_splits[vbbu_tuple[0]] = split
+
+					# check if applying split 7 we still have to change split of other vbbus
+					if diff_bw < phi_bytes_drops*self.reduce_percnt:
+						# update splitting of next vbbu
+						reduced_bw += diff_bw
+						print "Reduced bw: %f" % reduced_bw				
+						break
+			else:
+				break
+
+		if reduced_bw < phi_bytes_drops*self.reduce_percnt:
+			print "WARNING: Demand higher than BW capacity after all splits done."
+		
+		# write changes to the EDGE VBBU POOL
+		if len(changed_vBBU_splits) > 0:
+			print changed_vBBU_splits
+			for cada in changed_vBBU_splits:
+				#create pkt
+				str_vbbu = str(cada)
+				cell_id = '0'
+				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+cell_id, 'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
+				print split_updt
+				self.MID_port.downstream.put(split_updt)
+				#send to MID_port
+				#self.MID_port.
+
+
+	#def check_enough_reduction(self,diff_bw,total_drops):
 
 	def read_metrics(self):
 		# wait interval to gather metrics
-		yield self.env.timeout(self.interval)
-		
-		# read amount of bytes dropped in midhaul
-		bytes_drop = self.last_UL_byte_drops
-		# default threshold is a max of 3% losses in order to trigger splitting updt 
-		if (bytes_drop/self.MID_port.max_bw) > self.threshold:
-			self.splitting_updt()
+		while True:
+			yield self.env.timeout(self.interval)
+			
+			# read amount of bytes dropped in midhaul
+			phi_metrics,vbbu_metrics = self.MID_port.get_metrics()
+			self.MID_max_bw = phi_metrics['max_bw']
+			bytes_drop = phi_metrics['UL_bytes_drops']
+			#print bytes_drop
+			# default thold_updt is a max of 3% losses in order to trigger splitting updt 
+			if (bytes_drop/self.MID_max_bw) > self.thold_updt:
+				self.splitting_updt(phi_metrics,vbbu_metrics)
 
-	def splitting_updt(self):
-		pass
-
-		
 
 class Edge_Cloud(object):
 	def __init__ (self,env,n_vBBUs,FH_switch,MID_switch):
@@ -281,35 +370,35 @@ class Central_Cloud(object):
 		self.baseline_energy= AC_energy + battery_energy + base_pool_energy
 		#self.baseline_energy=550	#from rodrigo's paper
 
-class vBBU_FH_Port(object):
-    def __init__(self, env, qlimit=None):
-        self.buffer = simpy.Store(env) #buffer
-        self.env = env
-        self.out = None # vBBU port output to FH # FH_switch[RRH_id] Store
-        self.packets_rec = 0 #received pkt counter
-        self.packets_tx = 0 #tx pkt counter
-        self.packets_drop = 0 #dropped pkt counter
-        self.qlimit = qlimit #Buffer queue limit
-        self.byte_size = 0  # Current size of the buffer in bytes
-        self.action = env.process(self.run())  # starts the run() method as a SimPy process
-        self.pkt = None #network packet obj
-
 class Edge_vBBU_Pool(object):
 	def __init__(self,env,cell_id,n_vBBUs,edge_vBBU_dict,MID_phi_port):
 		self.env = env
 		self.cell_id = cell_id
+		self.name = 'edge_pool_'+str(self.cell_id)
 		self.MID_phi_port = MID_phi_port
 		self.edge_vBBU_dict = edge_vBBU_dict
 		
+		self.DL_buffer = simpy.Store(env) # communication from metro & orch with this edge pool
+
 		for vBBU in edge_vBBU_dict.values():
 			vBBU.MID_port = self.MID_phi_port
 
 		self.baseline_energy = 5 + (n_vBBUs * 5)
 
-		self.MID_phi_port.set_edge_ctrl(self)
-
 		# here run monitoring or something alike 
 		# self.action = self.env.process(self.monitoring())
+		self.action = self.env.process(self.listen_orchestrator())
+		
+		# add DL entry at MID switch to enable orchestrator communication 
+		self.MID_phi_port.add_DL_entry(self.name,self)
+		
+
+	def listen_orchestrator(self):
+		pkt = yield self.DL_buffer.get()
+		print pkt
+		if pkt['dst'] == self.name:
+			self.set_vBBU_split(pkt['vBBU_id'],pkt['split'])
+
 
 	def set_vBBU_split(self,vBBU_id,split):
 		# orchestrator changing a split option of a vBBU
@@ -319,9 +408,10 @@ class Edge_vBBU_Pool(object):
 class Metro_vBBU_Pool(object):
 	def __init__(self,env,cell_id,n_vBBUs,metro_vBBU_dict,MID_phi_port):
 		self.env = env
-		self.cell_id = cell_id
+		self.cell_id = str(cell_id)
+		self.name = 'metro_pool_'+str(self.cell_id)
 		self.MID_phi_port = MID_phi_port
-		self.MID_phi_port.set_metro_ctrl(self)
+		#self.MID_phi_port.set_metro_ctrl(self)
 
 		self.metro_vBBU_dict = metro_vBBU_dict
 		
@@ -330,6 +420,8 @@ class Metro_vBBU_Pool(object):
 			vBBU.MID_port = self.MID_phi_port
 
 		self.baseline_energy = 5 + (n_vBBUs * 2)
+
+		self.MID_phi_port.add_UL_entry(self.name,self)
 
 		# here run monitoring or something alike 
 		# self.action = self.env.process(self.monitoring())
@@ -396,7 +488,7 @@ class Metro_vBBU(vBBU):
 		# print "METRO CLOUD"
 		# print "Coding: %d" % pkt.coding,
 		# print "CPRI_OPTION %d" % pkt.CPRI_option,
-		# print "RRH ID %s " % pkt.rrh_id,
+		# print "RRH ID %s " % pkt.dst,
 		# print "Split: %d" % pkt.split
 		# #pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
@@ -462,7 +554,7 @@ class Edge_vBBU(vBBU):
 	def splitting(self,pkt):
 		#print "Coding: %d" % pkt.coding,
 		#print "CPRI_OPTION %d" % pkt.CPRI_option,
-		#print "RRH ID %s " % pkt.rrh_id,
+		#print "RRH ID %s " % pkt.dst,
 		#print "Split: %d" % self.split
 		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
@@ -503,9 +595,11 @@ class Packet_CPRI(object):
     def __init__(self, time,rrh_id, coding, CPRI_option, id, src="a", dst="z"):
 		self.time = time# creation time
 		self.rrh_id= rrh_id
+		self.plane='data'
 		self.coding = coding #same as MCS
 		self.CPRI_option = CPRI_option
 		self.size = (splits_info[coding][CPRI_option][1]['bw'])/1000
+		#print self.size
 		#self.PRB = PRB #not represented for now
 		self.id = id # packet id
 		self.src = src #packet source address
@@ -540,7 +634,7 @@ class Packet_Generator(object):
             self.packets_sent += 1
             #print "New packet generated at %f" % self.env.now
     
-            p = Packet_CPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id)
+            p = Packet_CPRI(self.env.now, self.rrh_id, self.coding, self.CPRI_option, self.packets_sent, src=self.rrh_id, dst=self.rrh_id)
             #time,rrh_id, coding, CPRI_option, id, src="a"
             #print p
             #Logging
@@ -638,70 +732,191 @@ class RRH_Port(object):
             self.buffer.put(pkt)
 
 class Phi_port_pool(object):
-	def __init__(self,env,cell_id,NUMBER_OF_RRHs,UL_vBBU_obj_dict,DL_vBBU_obj_dict=None,\
+	def __init__(self,env,name,cell_id,NUMBER_OF_RRHs,UL_vBBU_obj_dict,DL_vBBU_obj_dict={},\
 				 max_bw=None, bw_check_interval=1000):
 		self.env = env
+		self.name = name
 		self.cell_id = cell_id
 		self.DL_vBBU_obj_dict = DL_vBBU_obj_dict
 		self.UL_vBBU_obj_dict = UL_vBBU_obj_dict
 		self.num_RRHs=NUMBER_OF_RRHs
+
+		self.UL_metrics = defaultdict(lambda : defaultdict(float))
+
+		for UL_vBBU in self.UL_vBBU_obj_dict:
+			#print "UL vBBU = %d" % UL_vBBU
+			self.UL_metrics[UL_vBBU]['UL_pkt_rx'] = 0
+			self.UL_metrics[UL_vBBU]['UL_bytes_rx'] = 0
+			self.UL_metrics[UL_vBBU]['UL_pkt_tx'] = 0
+			self.UL_metrics[UL_vBBU]['UL_bytes_tx'] = 0
+			self.UL_metrics[UL_vBBU]['UL_pkt_drops'] = 0
+			self.UL_metrics[UL_vBBU]['UL_bytes_drops'] = 0
+			self.UL_metrics[UL_vBBU]['UL_pkt_errors'] = 0
+
+			self.UL_metrics[UL_vBBU]['last_UL_bytes_rx'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_bytes_tx'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_rx'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_tx'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_drops'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_bytes_drops'] = 0
+			self.UL_metrics[UL_vBBU]['UL_usage'] = 0 # this metric is always outdated by concept
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_errors'] = 0
+			#print self.UL_metrics[UL_vBBU]
 		
 		self.max_bw = max_bw
 		if max_bw is not None:
-			self.UL_bw_interval = max_bw
-			self.DL_bw_interval = max_bw
+			self.UL_bw_interval = 0
+			self.DL_bw_interval = 0
 		self.bw_check_interval = bw_check_interval # default 1 seg = 1000ms
 		
 		# metrics UL
 		self.UL_pkt_rx = 0
+		self.UL_bytes_rx = 0
 		self.UL_pkt_tx = 0
+		self.UL_bytes_tx = 0
 		self.UL_pkt_errors = 0
 		self.UL_pkt_drops = 0
-		self.UL_buffer_size = 0
-		self.UL_byte_count = 0
-		# DL
+		self.UL_bytes_drops = 0
+		self.UL_usage = 0
+		self.last_UL_bytes_rx = 0
+		self.last_UL_bytes_tx = 0
+		self.last_UL_pkt_rx = 0
+		self.last_UL_pkt_tx = 0
+		self.last_UL_pkt_errors = 0
+		self.last_UL_pkt_drops = 0
+		self.last_UL_bytes_drops = 0
+
+		# TODO: increment and decrement buffer size on puts and gets
+		self.UL_buffer_size = 0 # create function for put and get
+
+		#------- DL -------
 		self.DL_pkt_rx = 0
+		self.DL_bytes_rx = 0
 		self.DL_pkt_tx = 0
+		self.DL_bytes_tx = 0
 		self.DL_pkt_errors = 0
 		self.DL_pkt_drops = 0
+		
+		# TODO: increment and decrement buffer size on puts and gets
 		self.DL_buffer_size = 0
-		self.DL_byte_count = 0
-		###
+		#--------------
 
 		# consider there's only a single phy port for vBBUpool at midhaul with UL and DL streams
 		self.upstream = simpy.Store(env)
 		self.downstream = simpy.Store(env)
 
 		self.pkt_uplink = env.process(self.pkt_uplink())
-		if self.DL_vBBU_obj_dict is not None:
-			self.pkt_downlink = env.process(self.pkt_downlink())
+		self.pkt_downlink = env.process(self.pkt_downlink())
 
-		# TODO: check for max BW
+		# measure metrics and check the BW in midhaul during interval
 		if max_bw is not None:
 			self.bw_check = env.process(self.bw_check())
+
+	def add_UL_entry(self,key,obj):
+		if key in self.UL_vBBU_obj_dict.keys():
+			print "ERROR: key %d already exists in %s UL_table" % (key,self.name)
+		else:
+			self.UL_vBBU_obj_dict[key]=obj
+			
+	def del_UL_entry(self,key,obj):
+		try: 
+			del self.UL_vBBU_obj_dict[key]
+		except:
+			print "ERROR: key %d doesn't exist in %s UL_table" % (key,self.name)
+
+	def add_DL_entry(self,key,obj):
+		if key in self.DL_vBBU_obj_dict:
+			print "ERROR: key %d already exists in %s DL_table" % (key,self.name)
+		else:
+			self.DL_vBBU_obj_dict[key]=obj
+
+	def del_DL_entry(self,key,obj):
+		try:
+			del self.DL_vBBU_obj_dict[key]
+		except:
+			print "ERROR: key %d already exists in %s DL_table" % (key,self.name)
 
 	def bw_check(self):
 		while True:
 			yield self.env.timeout(self.bw_check_interval)
-			UL_bytes_requested = self.max_bw - self.UL_bw_interval
-			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_pkt_rx,UL_bytes_requested)
-			print "UL pkt drops: %d.  pkt errors: %d " % (self.UL_pkt_drops, self.UL_pkt_errors)
-			print "UL tx: %d pkts and %.3f Mbps\n" % (self.UL_pkt_tx, self.UL_byte_count)
-
+			print "---MID CHECK ---"
+			#self.last_UL_pkt_drops = self.UL_pkt_drops 
+			#self.last_UL_byte_drops = self.UL_bw_interval - self.UL_byte_count
+			
+			#calc usage
+			self.UL_tx_bytes_diff = self.UL_bytes_tx - self.last_UL_bytes_tx
+			self.UL_tx_pkt_diff = self.UL_pkt_tx - self.last_UL_pkt_tx
+			self.UL_rx_bytes_diff = self.UL_bytes_rx - self.last_UL_bytes_rx
+			self.UL_rx_pkt_diff = self.UL_pkt_rx - self.last_UL_pkt_rx
+			self.UL_pkt_drop_diff = self.UL_pkt_drops - self.last_UL_pkt_drops
+			self.UL_bytes_drop_diff = self.UL_bytes_drops - self.last_UL_bytes_drops
+			
+			# update last values to actual values
+			self.last_UL_bytes_rx = self.UL_bytes_rx
+			self.last_UL_bytes_tx = self.UL_bytes_tx
+			self.last_UL_pkt_rx = self.UL_pkt_rx
+			self.last_UL_pkt_tx = self.UL_pkt_tx
+			self.last_UL_pkt_errors = self.UL_pkt_errors
 			self.last_UL_pkt_drops = self.UL_pkt_drops
-			self.last_UL_byte_drops = UL_bytes_requested - self.UL_byte_count
-			#
-			self.UL_bw_interval = self.max_bw
-			self.DL_bw_interval = self.max_bw
+			self.last_UL_bytes_drops = self.UL_bytes_drops
+
+			print ""
+			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_rx_pkt_diff,self.UL_rx_bytes_diff)
+			print "UL drops: %d pkts and %.3f Mbps " % (self.UL_pkt_drop_diff, self.UL_bytes_drop_diff)
+			print "UL tx: %d pkts and %.3f Mbps" % (self.UL_tx_pkt_diff, self.UL_tx_bytes_diff)
+
+			for vBBU in self.UL_metrics:
+				#calc usage
+				print vBBU
+				self.UL_metrics[vBBU]['UL_tx_bytes_diff'] = self.UL_metrics[vBBU]['UL_bytes_tx'] - self.UL_metrics[vBBU]['last_UL_bytes_tx']
+				self.UL_metrics[vBBU]['UL_tx_pkt_diff'] = self.UL_metrics[vBBU]['UL_pkt_tx'] - self.UL_metrics[vBBU]['last_UL_pkt_tx']
+				self.UL_metrics[vBBU]['UL_rx_bytes_diff'] = self.UL_metrics[vBBU]['UL_bytes_rx'] - self.UL_metrics[vBBU]['last_UL_bytes_rx']
+				self.UL_metrics[vBBU]['UL_rx_pkt_diff'] = self.UL_metrics[vBBU]['UL_pkt_rx'] - self.UL_metrics[vBBU]['last_UL_pkt_rx']
+				self.UL_metrics[vBBU]['UL_pkt_drop_diff'] = self.UL_metrics[vBBU]['UL_pkt_drops'] - self.UL_metrics[vBBU]['last_UL_pkt_drops']
+				self.UL_metrics[vBBU]['UL_bytes_drop_diff'] = self.UL_metrics[vBBU]['UL_bytes_drops'] - self.UL_metrics[vBBU]['last_UL_bytes_drops']
+				
+				# update last values to actual values
+				self.UL_metrics[vBBU]['last_UL_bytes_rx'] = self.UL_metrics[vBBU]['UL_bytes_rx']
+				self.UL_metrics[vBBU]['last_UL_bytes_tx'] = self.UL_metrics[vBBU]['UL_bytes_tx']
+				self.UL_metrics[vBBU]['last_UL_pkt_rx'] = self.UL_metrics[vBBU]['UL_pkt_rx']
+				self.UL_metrics[vBBU]['last_UL_pkt_tx'] = self.UL_metrics[vBBU]['UL_pkt_tx']
+				self.UL_metrics[vBBU]['last_UL_pkt_errors'] = self.UL_metrics[vBBU]['UL_pkt_errors']
+				self.UL_metrics[vBBU]['last_UL_pkt_drops'] = self.UL_metrics[vBBU]['UL_pkt_drops']
+				self.UL_metrics[vBBU]['last_UL_bytes_drops'] = self.UL_metrics[vBBU]['UL_bytes_drops']
+
+				print ""
+				print "vBBU%d UL rx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_rx_pkt_diff'],self.UL_metrics[vBBU]['UL_rx_bytes_diff'])
+				print "vBBU%d UL drops: %d pkts and %.3f Mbps " % (vBBU, self.UL_metrics[vBBU]['UL_pkt_drop_diff'], self.UL_metrics[vBBU]['UL_bytes_drop_diff'])
+				print "vBBU%d UL tx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_tx_pkt_diff'], self.UL_metrics[vBBU]['UL_tx_bytes_diff'])
+
+
 			# zeroing counters
-			self.UL_pkt_rx = self.UL_pkt_tx = self.UL_byte_count = \
-			self.UL_pkt_drops = self.UL_pkt_errors = 0
+			self.UL_bw_interval = 0
+			self.DL_bw_interval = 0
 
-	def set_edge_ctrl(self,edge_ctrl):
-		self.edge_ctrl = edge_ctrl
+			# for vBBU in self.UL_metrics:
+			# 	self.UL_metrics[vBBU]['']
+			print "------"
 
-	def set_metro_ctrl(self,metro_ctrl):
-			self.metro_ctrl = metro_ctrl
+	def get_metrics(self):
+		self.phi_UL_metrics={}
+		self.phi_UL_metrics['UL_pkt_rx']= self.UL_pkt_rx
+		self.phi_UL_metrics['UL_bytes_rx'] = self.UL_bytes_rx
+		self.phi_UL_metrics['UL_pkt_tx'] = self.UL_pkt_tx
+		self.phi_UL_metrics['UL_bytes_tx'] = self.UL_bytes_tx
+		self.phi_UL_metrics['UL_pkt_errors'] = self.UL_pkt_errors
+		self.phi_UL_metrics['UL_pkt_drops'] = self.UL_pkt_drops
+		self.phi_UL_metrics['UL_bytes_drops'] = self.UL_bytes_drops
+		self.phi_UL_metrics['UL_usage'] = self.UL_usage
+		self.phi_UL_metrics['last_UL_bytes_rx'] = self.last_UL_bytes_rx
+		self.phi_UL_metrics['last_UL_bytes_tx'] = self.last_UL_bytes_tx
+		self.phi_UL_metrics['last_UL_pkt_rx'] = self.last_UL_pkt_rx
+		self.phi_UL_metrics['last_UL_pkt_tx'] = self.last_UL_pkt_tx
+		self.phi_UL_metrics['last_UL_pkt_errors'] = self.last_UL_pkt_errors	
+		self.phi_UL_metrics['last_UL_pkt_drops'] = self.last_UL_pkt_drops
+		self.phi_UL_metrics['last_UL_bytes_drops'] = self.last_UL_bytes_drops
+		self.phi_UL_metrics['max_bw'] = self.max_bw
+		return self.phi_UL_metrics,self.UL_metrics
 
 	def set_vBBU_dict(self,vBBU_obj_dict):
 		self.vBBU_obj_dict = vBBU_obj_dict
@@ -710,30 +925,53 @@ class Phi_port_pool(object):
 		while True:
 			pkt = yield self.upstream.get() # get pkt from a RRH of cell
 			self.UL_pkt_rx +=1
-			if self.max_bw is not None:
-				self.UL_bw_interval -= pkt.size
-			 	if self.UL_bw_interval < 0:
-					#print "TIME: %f. WARNING: Pkt UL BLOCK!" % self.env.now
-					self.UL_pkt_drops +=1
+			self.UL_metrics[pkt.dst]['UL_pkt_rx']+=1
 
+			if self.max_bw is not None:
+				self.UL_bw_interval += pkt.size
+				self.UL_bytes_rx += pkt.size
+				self.UL_metrics[pkt.dst]['UL_bytes_rx']+= pkt.size
+
+			 	if self.UL_bw_interval > self.max_bw:
+					#print "TIME: %f. WARNING: Pkt UL BLOCK!" % self.env.now
+					# all UL
+					self.UL_pkt_drops +=1
+					self.UL_bytes_drops += pkt.size
+					# individual vbbu counters
+					self.UL_metrics[pkt.dst]['UL_pkt_drops']+= 1
+					self.UL_metrics[pkt.dst]['UL_bytes_drops']+= pkt.size
 					del pkt
+
 				else:
-					self.UL_vBBU_obj_dict[pkt.rrh_id].UL_buffer.put(pkt)
-					self.UL_byte_count += pkt.size
-					self.UL_pkt_tx +=1
-			# insert pkt in virtual vBBU port
-			#print "TESTEEEEEEEEEE"
+					if pkt.plane == 'ctrl':
+						self.UL_vBBU_obj_dict['metro_pool'].UL_buffer.put(pkt)
+					else:
+						self.UL_vBBU_obj_dict[pkt.dst].UL_buffer.put(pkt)
+						# all UL
+						self.UL_pkt_tx +=1
+						self.UL_bytes_tx += pkt.size
+						# individual vbbu counters
+						self.UL_metrics[pkt.dst]['UL_pkt_tx']+= 1
+						self.UL_metrics[pkt.dst]['UL_bytes_tx']+= pkt.size
+					
 			else:
-				#print self.UL_vBBU_obj_dict[pkt.rrh_id]
-				self.UL_vBBU_obj_dict[pkt.rrh_id].UL_buffer.put(pkt)
-				self.UL_byte_count += pkt.size
+				#print self.UL_vBBU_obj_dict[pkt.dst]
+				self.UL_vBBU_obj_dict[pkt.dst].UL_buffer.put(pkt)
+				# ALL UL
+				self.UL_bytes_tx += pkt.size
 				self.UL_pkt_tx +=1
+				# individual vbbu counters
+				self.UL_metrics[pkt.dst]['UL_pkt_tx']+= 1
+				self.UL_metrics[pkt.dst]['UL_bytes_tx']+= pkt.size
 
 	def pkt_downlink(self):
 		while True:
 			pkt = yield self.downstream.get() # get pkt from a RRH of cell
 			# insert pkt in virtual vBBU port
-			self.DL_vBBU_metro_obj_dict[pkt.rrh_id].DL_MID_buffer.put(pkt)
+			print pkt
+			print "DL pkt dst: %s" % pkt['dst']
+			print self.DL_vBBU_obj_dict 
+			self.DL_vBBU_obj_dict[pkt['dst']].DL_buffer.put(pkt)
 
 
 env = simpy.Environment()
@@ -757,13 +995,14 @@ for cell_id in range(num_cells):
 		metro_vBBU_dict[vBBU_id] = Metro_vBBU(env,cell_id,vBBU_id,splitting_table)
 		edge_vBBU_dict[vBBU_id] = Edge_vBBU(env,cell_id,vBBU_id,splitting_table)
 
-	FH_phi_port = Phi_port_pool(env,cell_id,num_RRHs,edge_vBBU_dict)
-	MID_phi_port = Phi_port_pool(env,cell_id,num_RRHs,metro_vBBU_dict,edge_vBBU_dict,max_bw=1000)
+	FH_phi_port = Phi_port_pool(env,'FH',cell_id,num_RRHs,edge_vBBU_dict)
+	MID_phi_port = Phi_port_pool(env,'MID',cell_id,num_RRHs,metro_vBBU_dict,edge_vBBU_dict,max_bw=1000)
 	
-	Edge_vBBU_Pool(env,cell_id,num_RRHs,edge_vBBU_dict,MID_phi_port)
-	Metro_vBBU_Pool(env,cell_id,num_RRHs,metro_vBBU_dict,MID_phi_port)
+	edge_pool = Edge_vBBU_Pool(env,cell_id,num_RRHs,edge_vBBU_dict,MID_phi_port)
+	metro_pool = Metro_vBBU_Pool(env,cell_id,num_RRHs,metro_vBBU_dict,MID_phi_port)
 
 	for id in range(num_RRHs):
 		RRH(env,cell_id,id,id,0,FH_phi_port)
-
-env.run(until=3001)
+coding = 28
+orch = Orchestrator(env,num_RRHs,splitting_table,MID_phi_port,edge_vBBU_dict, 28)
+env.run(until=2001)
