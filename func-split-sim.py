@@ -210,14 +210,15 @@ for coding in range(0,29):
 #print(data_as_dict)
 
 # splits_info[MCS][CPRI option][Split]
-#for cada in range(1,8):
-#	print splits_info[28][1][cada] 
+for cada in range(1,8):
+	print splits_info[28][3][cada]
+print "---"
 
 #-----------CLASSES AND SIMULATOR-------------
 
 class Orchestrator(object):
 	def __init__ (self,env,n_vBBUs,splitting_table,MID_port,edge_vBBU_pool_obj,\
-				  fix_coding,interval=1002,thold_updt=0.03,multiplexing_rate=2,reduce_percnt=1.3):
+				  fix_coding,interval=2001,high_thold=0.9,low_thold=0.6): #multiplexing_rate=2
 		self.env=env
 		self.interval = interval
 		self.fix_coding = fix_coding
@@ -227,8 +228,8 @@ class Orchestrator(object):
 			self.vBBU_splits[cada] = 1
 		self.splitting_table = splitting_table
 		self.MID_port = MID_port
-		self.thold_updt = thold_updt
-		self.reduce_percnt = reduce_percnt
+		self.high_thold = high_thold
+		self.low_thold = low_thold
 
 		# meanwhile: only a list with vbbus of 1 cell and direct obj updts
 		self.edge_vBBU_pool_obj = edge_vBBU_pool_obj
@@ -250,85 +251,197 @@ class Orchestrator(object):
 		#for cada in MID_phi_ports: 
 		self.MID_port.add_UL_entry('orchestrator',self)
 
-
 		#self.metrics_dict = {}
 		self.read_metrics = self.env.process(self.read_metrics())
 
-	def splitting_updt(self,phi_metrics,vbbu_metrics):
+	def high_splitting_updt(self,phi_metrics,vbbu_metrics):
 		# total phi drops
-		splitted = False
-		phi_bytes_drops = phi_metrics['UL_bytes_drops']
+		bytes_usage = phi_metrics['UL_bytes_rx_diff']
 		reduced_bw = 0
-		print "----- ORCHESTRATOR ------"
+		print "\n\n----- ORCHESTRATOR ------"
+		print "Total byte usage MID: %f " % bytes_usage
 		#aux_vBBU_splits = dict(self.vBBU_splits) # auxiliary split dict during splitting updt
 		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
 		
-		# ordered list of most drops on a vBBU
-		dropper_list = []
-		list_pos = ()
+		# ordered list of most bw on a vBBU
+		usage_list = []
 		#print "VBBU_metrics"
 		#print vbbu_metrics
 		for cada in vbbu_metrics:
-			list_pos = (cada,vbbu_metrics[cada]['UL_bytes_drops'])
-			dropper_list.append(list_pos)
-		#list_pos = (1,1300)
-		#dropper_list.append(list_pos)
+			list_pos = (cada,vbbu_metrics[cada]['UL_bytes_rx_diff'])
+			usage_list.append(list_pos)
 
 		# ordered list
-		dropper_list.sort(key=itemgetter(1))
-		#print "Dropper list"
-		#print dropper_list
+		usage_list.sort(key=itemgetter(1),reverse=True)
+		#print "usage list:"
+		#print usage_list
+		#print ""
 		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
 		cpri_option = 3
 		#TODO: Consider energy in calcs
-
-		# get most droppers and change their split until around 10% under maximum bw of MID
-		for vbbu in vbbu_metrics:
-			#print "Reduced bw: %f" % reduced_bw
-			if reduced_bw < phi_bytes_drops*self.reduce_percnt:
-				vbbu_tuple = dropper_list.pop()
-				# get actual vbbu split
+		diff_bw = 0
+		split = 0
+		# get most usages and change their split until around 10% under maximum bw of MID
+		for vbbu_tuple in usage_list:
+			print "\nStart test vbbu: %d" % vbbu_tuple[0]
+			if (bytes_usage) > (self.high_thold * self.MID_max_bw):
+				print "ENTER IF 1: Bytes usage %f > h_thold %f" % (bytes_usage,(self.high_thold * self.MID_max_bw))
+				#print "Reduced bw: %f" % reduced_bw
 				vbbu_split = self.vBBU_splits[vbbu_tuple[0]]
 				#print "vbbu_split: %d" % vbbu_split
 				bw_vbbu_split = self.splitting_table[self.fix_coding][cpri_option][vbbu_split]['bw']
-				
-				# difference between actual split and split 7 to actual split
-				for split in range(vbbu_split+1,7+1)[::-1]:
+				last_bw_vbbu_split=bw_vbbu_split
+				print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" % (vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
+
+				for split in range(vbbu_split+1,7+1):
+					print "Test split %d" % split,
 					bw_split = self.splitting_table[self.fix_coding][cpri_option][split]['bw']
 					# difference between splits
 					diff_bw = bw_vbbu_split - bw_split
-					
-					#print "Reduced bw: %f" % reduced_bw
-					# add 
+					print "Diff bw= %.3f" % diff_bw
 					changed_vBBU_splits[vbbu_tuple[0]] = split
-
-					# check if applying split 7 we still have to change split of other vbbus
-					if diff_bw < phi_bytes_drops*self.reduce_percnt:
-						# update splitting of next vbbu
-						reduced_bw += diff_bw
-						print "Reduced bw: %f" % reduced_bw				
+					
+						#bytes_usage -= diff_bw
+					# if what was reduced is lower than our threshold
+					if (bytes_usage-diff_bw) <= (self.high_thold * self.MID_max_bw) or split==7:
+						print "ENTER IF 2: diff %f <= h_thold or split 7s" % (bytes_usage-diff_bw)
+						if (bytes_usage-diff_bw) <= (self.low_thold * self.MID_max_bw):
+							print "Entrou low_thold"
+							# test if last split bw is > h_thold
+							diff_bw2 = last_bw_diff
+							print diff_bw2
+							if (bytes_usage-diff_bw2) > (self.high_thold * self.MID_max_bw):
+								#if one split > h_thold and the other < l_thold...
+								# let the higher split and choose split of the next vbbu
+								print "Last split is higher than h_thold. %f" % (bytes_usage-diff_bw2)
+								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split)
+								changed_vBBU_splits[vbbu_tuple[0]] = split
+							else:
+								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split-1)
+								changed_vBBU_splits[vbbu_tuple[0]] = split-1
+							break
+						bytes_usage -= diff_bw
+						print "Next vbbu. Bytes usage now: %f " % bytes_usage
+						#set split
 						break
-			else:
-				break
+					last_bw_diff=diff_bw
+				
 
-		if reduced_bw < phi_bytes_drops*self.reduce_percnt:
-			print "WARNING: Demand higher than BW capacity after all splits done."
-		
 		# write changes to the EDGE VBBU POOL
+		#print "CHANGED"
+		print changed_vBBU_splits
 		if len(changed_vBBU_splits) > 0:
-			print changed_vBBU_splits
 			for cada in changed_vBBU_splits:
+				#print "CADA %d" % cada
 				#create pkt
 				str_vbbu = str(cada)
 				cell_id = '0'
 				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+cell_id, 'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
-				print split_updt
+				#print split_updt
+				#send to MID_port
+				self.MID_port.downstream.put(split_updt)
+
+				# updt splits table of edge vbbus 
+				self.vBBU_splits[cada]= changed_vBBU_splits[cada]
+
+	#def check_enough_reduction(self,diff_bw,total_drop):
+
+	def low_splitting_updt(self,phi_metrics,vbbu_metrics):
+		# total phi drops
+		bytes_usage = phi_metrics['UL_bytes_rx_diff']
+		reduced_bw = 0
+		print "----- LOW ORCHESTRATOR ------"
+		print "Total byte usage MID: %f " % bytes_usage
+		#aux_vBBU_splits = dict(self.vBBU_splits) # auxiliary split dict during splitting updt
+		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
+		
+		# ordered list of lowest bw on a vBBU
+		usage_list = []
+		#print "VBBU_metrics"
+		#print vbbu_metrics
+		for cada in vbbu_metrics:
+			list_pos = (cada,vbbu_metrics[cada]['UL_bytes_rx_diff'])
+			usage_list.append(list_pos)
+
+		# ordered list
+		usage_list.sort(key=itemgetter(1))
+		#print "usage list"
+		print usage_list
+		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
+		cpri_option = 3
+		#TODO: Consider energy in calcs
+		diff_bw = 0
+		split = 0
+		# get most usages and change their split until around 10% under maximum bw of MID
+		for vbbu_tuple in usage_list:
+			print "\nStart test vbbu: %d" % vbbu_tuple[0]
+			if (bytes_usage) <= (self.low_thold * self.MID_max_bw):
+				print "ENTER IF 1: Bytes usage %f <= l_thold %f" % (bytes_usage,(self.low_thold * self.MID_max_bw))
+				print self.vBBU_splits
+				#print "Reduced bw: %f" % reduced_bw
+				vbbu_split = self.vBBU_splits[vbbu_tuple[0]]
+				#print "vbbu_split: %d" % vbbu_split
+				bw_vbbu_split = self.splitting_table[self.fix_coding][cpri_option][vbbu_split]['bw']
+				last_bw_vbbu_split=bw_vbbu_split
+				print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" % (vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
+
+				print range(1,vbbu_split)[::-1]
+				for split in range(1,vbbu_split)[::-1]:
+					print "Test split %d" % split,
+					bw_split = self.splitting_table[self.fix_coding][cpri_option][split]['bw']
+					# difference between splits
+					diff_bw = bw_split - bw_vbbu_split
+
+					# initializing last_bw_diff at first bbbu
+					# if split == vbbu_split-1:
+					# 	last_bw_diff = diff_bw
+
+					print "DIFF BW: %.3f " % diff_bw
+					changed_vBBU_splits[vbbu_tuple[0]] = split
+					
+					# if (bytes_usage+diff_bw) > (self.high_thold * self.MID_max_bw):
+					# 	changed_vBBU_splits[vbbu_tuple[0]] = split+1
+					# 	diff_bw = last_bw_diff
+					# 	print "MAIOR. Volta p/ split %d c/ diff %f" % (split+1, diff_bw)
+					# 	break
+					# if what was reduced is lower than our threshold
+					if (bytes_usage+diff_bw) > (self.low_thold * self.MID_max_bw) or split == 1:
+						print "ENTER IF 2: diff %f > l_thold or split==1" % (bytes_usage+diff_bw)
+						if (bytes_usage+diff_bw) > (self.high_thold * self.MID_max_bw):
+							print "Entrou low_thold"
+							# test if last split bw is > h_thold
+							diff_bw2 = last_bw_diff
+							if (bytes_usage+diff_bw2) <= (self.low_thold * self.MID_max_bw):
+								#if one split > h_thold and the other < l_thold...
+								# let the lower split and choose split of the next vbbu
+								changed_vBBU_splits[vbbu_tuple[0]] = split+1
+							else:
+								break
+							
+						print "Entrou 4"
+						
+						bytes_usage += diff_bw
+						print bytes_usage
+						#set split
+						break
+					last_bw_diff=diff_bw
+
+		# write changes to the EDGE VBBU POOL
+		#print "CHANGED"
+		#print changed_vBBU_splits
+		if len(changed_vBBU_splits) > 0:
+			for cada in changed_vBBU_splits:
+				print "CADA %d" % cada
+				#create pkt
+				str_vbbu = str(cada)
+				cell_id = '0'
+				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+cell_id, 'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
+				#print split_updt
 				self.MID_port.downstream.put(split_updt)
 				#send to MID_port
 				#self.MID_port.
 
-
-	#def check_enough_reduction(self,diff_bw,total_drops):
+	#def check_enough_reduction(self,diff_bw,total_drop):
 
 	def read_metrics(self):
 		# wait interval to gather metrics
@@ -338,11 +451,15 @@ class Orchestrator(object):
 			# read amount of bytes dropped in midhaul
 			phi_metrics,vbbu_metrics = self.MID_port.get_metrics()
 			self.MID_max_bw = phi_metrics['max_bw']
-			bytes_drop = phi_metrics['UL_bytes_drops']
+			bytes_usage = phi_metrics['UL_bytes_rx_diff']
+			print bytes_usage
 			#print bytes_drop
-			# default thold_updt is a max of 3% losses in order to trigger splitting updt 
-			if (bytes_drop/self.MID_max_bw) > self.thold_updt:
-				self.splitting_updt(phi_metrics,vbbu_metrics)
+			# default high_thold is a max of 90% in order to trigger splitting updt 
+			if (bytes_usage > (self.high_thold * self.MID_max_bw)):
+				self.high_splitting_updt(phi_metrics,vbbu_metrics)
+			elif (bytes_usage <= (self.low_thold * self.MID_max_bw)):
+			 	self.low_splitting_updt(phi_metrics,vbbu_metrics)
+			print "\n\n"
 
 
 class Edge_Cloud(object):
@@ -394,14 +511,16 @@ class Edge_vBBU_Pool(object):
 		
 
 	def listen_orchestrator(self):
-		pkt = yield self.DL_buffer.get()
-		print pkt
-		if pkt['dst'] == self.name:
-			self.set_vBBU_split(pkt['vBBU_id'],pkt['split'])
+		while True:
+			pkt = yield self.DL_buffer.get()
+			print pkt
+			if pkt['dst'] == self.name:
+				self.set_vBBU_split(pkt['vBBU_id'],pkt['split'])
 
 
 	def set_vBBU_split(self,vBBU_id,split):
 		# orchestrator changing a split option of a vBBU
+		print "Setting split of vBBU%d to %d" % (vBBU_id,split)
 		edge_vBBU_dict[vBBU_id].set_split(split)
 
 
@@ -494,7 +613,7 @@ class Metro_vBBU(vBBU):
 		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
 		
 		if pkt.split == 7: # if C-RAN split send everything to MetroCloud
-			print "Split 7. Pkt%d already processed. Nothing to do" % pkt.id
+			#print "Split 7. Pkt%d already processed. Nothing to do" % pkt.id
 			del pkt
 			return
 
@@ -749,18 +868,18 @@ class Phi_port_pool(object):
 			self.UL_metrics[UL_vBBU]['UL_bytes_rx'] = 0
 			self.UL_metrics[UL_vBBU]['UL_pkt_tx'] = 0
 			self.UL_metrics[UL_vBBU]['UL_bytes_tx'] = 0
-			self.UL_metrics[UL_vBBU]['UL_pkt_drops'] = 0
-			self.UL_metrics[UL_vBBU]['UL_bytes_drops'] = 0
-			self.UL_metrics[UL_vBBU]['UL_pkt_errors'] = 0
+			self.UL_metrics[UL_vBBU]['UL_pkt_drop'] = 0
+			self.UL_metrics[UL_vBBU]['UL_bytes_drop'] = 0
+			self.UL_metrics[UL_vBBU]['UL_pkt_error'] = 0
 
 			self.UL_metrics[UL_vBBU]['last_UL_bytes_rx'] = 0
 			self.UL_metrics[UL_vBBU]['last_UL_bytes_tx'] = 0
 			self.UL_metrics[UL_vBBU]['last_UL_pkt_rx'] = 0
 			self.UL_metrics[UL_vBBU]['last_UL_pkt_tx'] = 0
-			self.UL_metrics[UL_vBBU]['last_UL_pkt_drops'] = 0
-			self.UL_metrics[UL_vBBU]['last_UL_bytes_drops'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_drop'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_bytes_drop'] = 0
 			self.UL_metrics[UL_vBBU]['UL_usage'] = 0 # this metric is always outdated by concept
-			self.UL_metrics[UL_vBBU]['last_UL_pkt_errors'] = 0
+			self.UL_metrics[UL_vBBU]['last_UL_pkt_error'] = 0
 			#print self.UL_metrics[UL_vBBU]
 		
 		self.max_bw = max_bw
@@ -774,17 +893,17 @@ class Phi_port_pool(object):
 		self.UL_bytes_rx = 0
 		self.UL_pkt_tx = 0
 		self.UL_bytes_tx = 0
-		self.UL_pkt_errors = 0
-		self.UL_pkt_drops = 0
-		self.UL_bytes_drops = 0
+		self.UL_pkt_error = 0
+		self.UL_pkt_drop = 0
+		self.UL_bytes_drop = 0
 		self.UL_usage = 0
 		self.last_UL_bytes_rx = 0
 		self.last_UL_bytes_tx = 0
 		self.last_UL_pkt_rx = 0
 		self.last_UL_pkt_tx = 0
-		self.last_UL_pkt_errors = 0
-		self.last_UL_pkt_drops = 0
-		self.last_UL_bytes_drops = 0
+		self.last_UL_pkt_error = 0
+		self.last_UL_pkt_drop = 0
+		self.last_UL_bytes_drop = 0
 
 		# TODO: increment and decrement buffer size on puts and gets
 		self.UL_buffer_size = 0 # create function for put and get
@@ -794,8 +913,8 @@ class Phi_port_pool(object):
 		self.DL_bytes_rx = 0
 		self.DL_pkt_tx = 0
 		self.DL_bytes_tx = 0
-		self.DL_pkt_errors = 0
-		self.DL_pkt_drops = 0
+		self.DL_pkt_error = 0
+		self.DL_pkt_drop = 0
 		
 		# TODO: increment and decrement buffer size on puts and gets
 		self.DL_buffer_size = 0
@@ -840,54 +959,54 @@ class Phi_port_pool(object):
 		while True:
 			yield self.env.timeout(self.bw_check_interval)
 			print "---MID CHECK ---"
-			#self.last_UL_pkt_drops = self.UL_pkt_drops 
-			#self.last_UL_byte_drops = self.UL_bw_interval - self.UL_byte_count
+			#self.last_UL_pkt_drop = self.UL_pkt_drop 
+			#self.last_UL_byte_drop = self.UL_bw_interval - self.UL_byte_count
 			
 			#calc usage
-			self.UL_tx_bytes_diff = self.UL_bytes_tx - self.last_UL_bytes_tx
-			self.UL_tx_pkt_diff = self.UL_pkt_tx - self.last_UL_pkt_tx
-			self.UL_rx_bytes_diff = self.UL_bytes_rx - self.last_UL_bytes_rx
-			self.UL_rx_pkt_diff = self.UL_pkt_rx - self.last_UL_pkt_rx
-			self.UL_pkt_drop_diff = self.UL_pkt_drops - self.last_UL_pkt_drops
-			self.UL_bytes_drop_diff = self.UL_bytes_drops - self.last_UL_bytes_drops
-			
+			self.UL_bytes_tx_diff = self.UL_bytes_tx - self.last_UL_bytes_tx
+			self.UL_pkt_tx_diff = self.UL_pkt_tx - self.last_UL_pkt_tx
+			self.UL_bytes_rx_diff = self.UL_bytes_rx - self.last_UL_bytes_rx
+			self.UL_pkt_rx_diff = self.UL_pkt_rx - self.last_UL_pkt_rx
+			self.UL_pkt_drop_diff = self.UL_pkt_drop - self.last_UL_pkt_drop
+			self.UL_bytes_drop_diff = self.UL_bytes_drop - self.last_UL_bytes_drop
+			self.UL_pkt_error_diff = self.UL_pkt_error - self.last_UL_pkt_error
 			# update last values to actual values
 			self.last_UL_bytes_rx = self.UL_bytes_rx
 			self.last_UL_bytes_tx = self.UL_bytes_tx
 			self.last_UL_pkt_rx = self.UL_pkt_rx
 			self.last_UL_pkt_tx = self.UL_pkt_tx
-			self.last_UL_pkt_errors = self.UL_pkt_errors
-			self.last_UL_pkt_drops = self.UL_pkt_drops
-			self.last_UL_bytes_drops = self.UL_bytes_drops
+			self.last_UL_pkt_error = self.UL_pkt_error
+			self.last_UL_pkt_drop = self.UL_pkt_drop
+			self.last_UL_bytes_drop = self.UL_bytes_drop
 
 			print ""
-			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_rx_pkt_diff,self.UL_rx_bytes_diff)
+			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_pkt_rx_diff,self.UL_bytes_rx_diff)
 			print "UL drops: %d pkts and %.3f Mbps " % (self.UL_pkt_drop_diff, self.UL_bytes_drop_diff)
-			print "UL tx: %d pkts and %.3f Mbps" % (self.UL_tx_pkt_diff, self.UL_tx_bytes_diff)
+			print "UL tx: %d pkts and %.3f Mbps" % (self.UL_pkt_tx_diff, self.UL_bytes_tx_diff)
 
 			for vBBU in self.UL_metrics:
 				#calc usage
 				print vBBU
-				self.UL_metrics[vBBU]['UL_tx_bytes_diff'] = self.UL_metrics[vBBU]['UL_bytes_tx'] - self.UL_metrics[vBBU]['last_UL_bytes_tx']
-				self.UL_metrics[vBBU]['UL_tx_pkt_diff'] = self.UL_metrics[vBBU]['UL_pkt_tx'] - self.UL_metrics[vBBU]['last_UL_pkt_tx']
-				self.UL_metrics[vBBU]['UL_rx_bytes_diff'] = self.UL_metrics[vBBU]['UL_bytes_rx'] - self.UL_metrics[vBBU]['last_UL_bytes_rx']
-				self.UL_metrics[vBBU]['UL_rx_pkt_diff'] = self.UL_metrics[vBBU]['UL_pkt_rx'] - self.UL_metrics[vBBU]['last_UL_pkt_rx']
-				self.UL_metrics[vBBU]['UL_pkt_drop_diff'] = self.UL_metrics[vBBU]['UL_pkt_drops'] - self.UL_metrics[vBBU]['last_UL_pkt_drops']
-				self.UL_metrics[vBBU]['UL_bytes_drop_diff'] = self.UL_metrics[vBBU]['UL_bytes_drops'] - self.UL_metrics[vBBU]['last_UL_bytes_drops']
+				self.UL_metrics[vBBU]['UL_bytes_tx_diff'] = self.UL_metrics[vBBU]['UL_bytes_tx'] - self.UL_metrics[vBBU]['last_UL_bytes_tx']
+				self.UL_metrics[vBBU]['UL_pkt_tx_diff'] = self.UL_metrics[vBBU]['UL_pkt_tx'] - self.UL_metrics[vBBU]['last_UL_pkt_tx']
+				self.UL_metrics[vBBU]['UL_bytes_rx_diff'] = self.UL_metrics[vBBU]['UL_bytes_rx'] - self.UL_metrics[vBBU]['last_UL_bytes_rx']
+				self.UL_metrics[vBBU]['UL_pkt_rx_diff'] = self.UL_metrics[vBBU]['UL_pkt_rx'] - self.UL_metrics[vBBU]['last_UL_pkt_rx']
+				self.UL_metrics[vBBU]['UL_pkt_drop_diff'] = self.UL_metrics[vBBU]['UL_pkt_drop'] - self.UL_metrics[vBBU]['last_UL_pkt_drop']
+				self.UL_metrics[vBBU]['UL_bytes_drop_diff'] = self.UL_metrics[vBBU]['UL_bytes_drop'] - self.UL_metrics[vBBU]['last_UL_bytes_drop']
 				
 				# update last values to actual values
 				self.UL_metrics[vBBU]['last_UL_bytes_rx'] = self.UL_metrics[vBBU]['UL_bytes_rx']
 				self.UL_metrics[vBBU]['last_UL_bytes_tx'] = self.UL_metrics[vBBU]['UL_bytes_tx']
 				self.UL_metrics[vBBU]['last_UL_pkt_rx'] = self.UL_metrics[vBBU]['UL_pkt_rx']
 				self.UL_metrics[vBBU]['last_UL_pkt_tx'] = self.UL_metrics[vBBU]['UL_pkt_tx']
-				self.UL_metrics[vBBU]['last_UL_pkt_errors'] = self.UL_metrics[vBBU]['UL_pkt_errors']
-				self.UL_metrics[vBBU]['last_UL_pkt_drops'] = self.UL_metrics[vBBU]['UL_pkt_drops']
-				self.UL_metrics[vBBU]['last_UL_bytes_drops'] = self.UL_metrics[vBBU]['UL_bytes_drops']
+				self.UL_metrics[vBBU]['last_UL_pkt_error'] = self.UL_metrics[vBBU]['UL_pkt_error']
+				self.UL_metrics[vBBU]['last_UL_pkt_drop'] = self.UL_metrics[vBBU]['UL_pkt_drop']
+				self.UL_metrics[vBBU]['last_UL_bytes_drop'] = self.UL_metrics[vBBU]['UL_bytes_drop']
 
 				print ""
-				print "vBBU%d UL rx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_rx_pkt_diff'],self.UL_metrics[vBBU]['UL_rx_bytes_diff'])
+				print "vBBU%d UL rx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_pkt_rx_diff'],self.UL_metrics[vBBU]['UL_bytes_rx_diff'])
 				print "vBBU%d UL drops: %d pkts and %.3f Mbps " % (vBBU, self.UL_metrics[vBBU]['UL_pkt_drop_diff'], self.UL_metrics[vBBU]['UL_bytes_drop_diff'])
-				print "vBBU%d UL tx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_tx_pkt_diff'], self.UL_metrics[vBBU]['UL_tx_bytes_diff'])
+				print "vBBU%d UL tx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_pkt_tx_diff'], self.UL_metrics[vBBU]['UL_bytes_tx_diff'])
 
 
 			# zeroing counters
@@ -904,18 +1023,20 @@ class Phi_port_pool(object):
 		self.phi_UL_metrics['UL_bytes_rx'] = self.UL_bytes_rx
 		self.phi_UL_metrics['UL_pkt_tx'] = self.UL_pkt_tx
 		self.phi_UL_metrics['UL_bytes_tx'] = self.UL_bytes_tx
-		self.phi_UL_metrics['UL_pkt_errors'] = self.UL_pkt_errors
-		self.phi_UL_metrics['UL_pkt_drops'] = self.UL_pkt_drops
-		self.phi_UL_metrics['UL_bytes_drops'] = self.UL_bytes_drops
+		self.phi_UL_metrics['UL_pkt_error'] = self.UL_pkt_error
+		self.phi_UL_metrics['UL_pkt_drop'] = self.UL_pkt_drop
+		self.phi_UL_metrics['UL_bytes_drop'] = self.UL_bytes_drop
 		self.phi_UL_metrics['UL_usage'] = self.UL_usage
-		self.phi_UL_metrics['last_UL_bytes_rx'] = self.last_UL_bytes_rx
-		self.phi_UL_metrics['last_UL_bytes_tx'] = self.last_UL_bytes_tx
-		self.phi_UL_metrics['last_UL_pkt_rx'] = self.last_UL_pkt_rx
-		self.phi_UL_metrics['last_UL_pkt_tx'] = self.last_UL_pkt_tx
-		self.phi_UL_metrics['last_UL_pkt_errors'] = self.last_UL_pkt_errors	
-		self.phi_UL_metrics['last_UL_pkt_drops'] = self.last_UL_pkt_drops
-		self.phi_UL_metrics['last_UL_bytes_drops'] = self.last_UL_bytes_drops
+		self.phi_UL_metrics['UL_bytes_rx_diff'] = self.UL_bytes_rx_diff
+		self.phi_UL_metrics['UL_bytes_tx_diff'] = self.UL_bytes_tx_diff
+		self.phi_UL_metrics['UL_pkt_rx_diff'] = self.UL_pkt_rx_diff
+		self.phi_UL_metrics['UL_bytes_tx_diff'] = self.UL_bytes_tx_diff
+		self.phi_UL_metrics['UL_pkt_error_diff'] = self.UL_pkt_error_diff
+		self.phi_UL_metrics['UL_pkt_drop_diff'] = self.UL_pkt_drop_diff
+		self.phi_UL_metrics['UL_bytes_drop_diff'] = self.UL_bytes_drop_diff
 		self.phi_UL_metrics['max_bw'] = self.max_bw
+
+
 		return self.phi_UL_metrics,self.UL_metrics
 
 	def set_vBBU_dict(self,vBBU_obj_dict):
@@ -935,11 +1056,11 @@ class Phi_port_pool(object):
 			 	if self.UL_bw_interval > self.max_bw:
 					#print "TIME: %f. WARNING: Pkt UL BLOCK!" % self.env.now
 					# all UL
-					self.UL_pkt_drops +=1
-					self.UL_bytes_drops += pkt.size
+					self.UL_pkt_drop +=1
+					self.UL_bytes_drop += pkt.size
 					# individual vbbu counters
-					self.UL_metrics[pkt.dst]['UL_pkt_drops']+= 1
-					self.UL_metrics[pkt.dst]['UL_bytes_drops']+= pkt.size
+					self.UL_metrics[pkt.dst]['UL_pkt_drop']+= 1
+					self.UL_metrics[pkt.dst]['UL_bytes_drop']+= pkt.size
 					del pkt
 
 				else:
@@ -968,9 +1089,9 @@ class Phi_port_pool(object):
 		while True:
 			pkt = yield self.downstream.get() # get pkt from a RRH of cell
 			# insert pkt in virtual vBBU port
-			print pkt
-			print "DL pkt dst: %s" % pkt['dst']
-			print self.DL_vBBU_obj_dict 
+			#print pkt
+			#print "DL pkt dst: %s" % pkt['dst']
+			#print self.DL_vBBU_obj_dict 
 			self.DL_vBBU_obj_dict[pkt['dst']].DL_buffer.put(pkt)
 
 
@@ -980,7 +1101,7 @@ env = simpy.Environment()
 splitting_table=splits_info
 adist = 1
 num_cells = 1
-num_RRHs=1
+num_RRHs=5
 
 #instances
 #x = PacketGenerator(env, rrh_id, adist)
@@ -1005,4 +1126,4 @@ for cell_id in range(num_cells):
 		RRH(env,cell_id,id,id,0,FH_phi_port)
 coding = 28
 orch = Orchestrator(env,num_RRHs,splitting_table,MID_phi_port,edge_vBBU_dict, 28)
-env.run(until=2001)
+env.run(until=8002)
