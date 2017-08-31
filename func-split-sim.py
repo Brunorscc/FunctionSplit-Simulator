@@ -10,25 +10,49 @@ import os
 import math
 from itertools import izip
 from operator import itemgetter
-dir_path = os.path.dirname(os.path.realpath(__file__))
 import time
 from scipy.stats import truncnorm
+import numpy as np
 
-directory = time.strftime("%Y-%m-%d_%H:%M:%S")
-os.makedirs("csv/"+directory)
+parser = argparse.ArgumentParser(description="Function Splitting - Hibryd RAN Simulator")
+#parser.add_argument("-D", type=str, default='ipact',choices=["ipact","pd_dba"], help="DBA algorithm")
+parser.add_argument("-D", "--duration", type=int, default=10, help="Duration of simulation, in seconds.")
+parser.add_argument("-S", "--seed", type=int, default=10, help="Random number generator seed number.")
+args = parser.parse_args()
 
-pkts_file = open("csv/{}/pkts.csv".format(directory),"w")
-proc_pkt_file = open("csv/{}/proc-pkt.csv".format(directory),"w")
-bw_usage_file = open("csv/{}/bw-usage.csv".format(directory),"w")
-base_energy_file = open("csv/{}/base-energy.csv".format(directory),"w")
-proc_usage_file = open("csv/{}/proc-usage.csv".format(directory),"w")
+#Arguments
+DURATION = args.duration
+SEED = args.seed
+adist = 10 # 1ms betw
+num_cells = 2
+num_RRHs = 7
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+# directory = "{}-{}-{}-{}-{}".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION))
+# os.makedirs("csv/"+directory)
+
+# timestamp = time.strftime("%Y-%m-%d_%H:%M:%S")
+# pkts_file = open("csv/{}/{}-pkts.csv".format(directory,timestamp),"w")
+# proc_pkt_file = open("csv/{}/{}-proc-pkt.csv".format(directory,timestamp),"w")
+# bw_usage_file = open("csv/{}/{}-bw-usage.csv".format(directory,timestamp),"w")
+# base_energy_file = open("csv/{}/{}-base-energy.csv".format(directory,timestamp),"w")
+# proc_usage_file = open("csv/{}/{}-proc-usage.csv".format(directory,timestamp),"w")
+
+# timestamp = time.strftime("%Y-%m-%d_%H:%M:%S")
+pkts_file = open("csv/pkt/{}-{}-{}-{}-{}-pkts.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+proc_pkt_file = open("csv/proc/{}-{}-{}-{}-{}-proc-pkt.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+bw_usage_file = open("csv/bw/{}-{}-{}-{}-{}-bw-usage.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+base_energy_file = open("csv/energy/{}-{}-{}-{}-{}-base-energy.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+proc_usage_file = open("csv/proc/{}-{}-{}-{}-{}-proc-usage.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+
+
+DURATION = DURATION * 1000
 
 pkts_file.write("timestamp,pkt_id,cell_id,prb,cpri_option,coding\n") #DONE
 proc_pkt_file.write("cell_id,vbbu_id,cloud,pkt_id,split,gops_vbbu,gops_pkt,energy,time_start,time_end,proc_delay\n") #DONE
-bw_usage_file.write("cell_id,vbbu_id,haul,pkt_id,bw,type\n")
-base_energy_file.write("entity,id,energy,timestamp\n")
-proc_usage_file.write("cell_id,vbbu_id,cloud,gops,pcnt,interval\n")
+bw_usage_file.write("cell_id,vbbu_id,haul,pkt_id,bw,plane,type\n") #DONE
+base_energy_file.write("entity,id,energy,timestamp\n") # DONE
+proc_usage_file.write("cell_id,vbbu_id,cloud,gops,pcnt,timestamp\n")
 
 #monitor 'justice' metrics after implementing joint (bw and energy) split algorithm
 
@@ -246,38 +270,15 @@ class Orchestrator(object):
 		self.interval = interval
 		self.fix_coding = fix_coding
 
-		# self.vBBUs_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-
 		# multi layer default dict \/
 		nested_dict = lambda: defaultdict(nested_dict)
 		self.vBBUs_dict = nested_dict()
-
-		#self.n_vBBUs = n_vBBUs
-		# self.vBBU_splits={}
-		# for cada in range(n_vBBUs):
-		# 	self.vBBU_splits[cada] = 1
-		#self.MID_port = MID_port
 
 		self.splitting_table = splitting_table
 		
 		self.high_thold = high_thold
 		self.low_thold = low_thold
 
-		# meanwhile: only a list with vbbus of 1 cell and direct obj updts
-		# self.edge_vBBU_pool_obj = edge_vBBU_pool_obj
-
-		#self.MID_max_bw = self.MID_port.max_bw
-		
-		# self.multiplexing_rate = 2 # baseline desired multiplexing rate #may not be used
-		# self.actual_multiplexing = 2
-		# self.last_multiplexing = 2
-		
-		# add UL entry at MID switch to enable edge_pools communication 
-		# for now only one mid switch
-		#for cada in MID_phi_ports:
-		#self.MID_port.add_UL_entry('orchestrator',self)
-
-		#self.metrics_dict = {}
 		self.read_metrics = self.env.process(self.read_metrics())
 	
 	def add_cell(self, cell_id, cell_id_edge_vBBUs, MID_phi_port, cell_id_metro_vBBUs):
@@ -301,15 +302,6 @@ class Orchestrator(object):
 
 				self.vBBUs_dict[cell_id][str(vBBU)]['split'] = 1
 
-
-	def add_cell_edge_vBBUs(self,cell_id,vBBU_dict,MID_phi_port):
-		self.edge_vBBUs[cell_id] = vBBU_dict
-		self.MID_phi_ports[cell_id] = MID_phi_port
-
-		# TODO:
-		# orch.add_cell_metro_vBBUs(cell_id, metro_DC.metro_vBBUs[cell_id])
-		# orch.add_cell_edge_vBBUs(cell_id, edge_DC[cell_id].edge_vBBUs)
-
 	def high_splitting_updt(self,cell_id,phi_metrics,vbbu_metrics,MID_port):
 		# total phi drops
 		bytes_usage = phi_metrics['UL_bytes_rx_diff']
@@ -317,9 +309,7 @@ class Orchestrator(object):
 		MID_max_bw = phi_metrics['max_bw']
 		print "\n\n----- ORCHESTRATOR ------"
 		print "Total byte usage MID: %f " % bytes_usage
-		x = default_to_regular(self.vBBUs_dict)
-		print x
-		#aux_vBBU_splits = dict(self.vBBU_splits) # auxiliary split dict during splitting updt
+		
 		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
 		
 		# ordered list of most bw on a vBBU
@@ -335,9 +325,11 @@ class Orchestrator(object):
 		#print "usage list:"
 		#print usage_list
 		#print ""
+		
 		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
 		cpri_option = 3
 		#TODO: Consider energy in calcs
+		
 		diff_bw = 0
 		split = 0
 		# get most usages and change their split until around 10% under maximum bw of MID
@@ -424,7 +416,7 @@ class Orchestrator(object):
 		MID_max_bw = phi_metrics['max_bw']
 		print "----- LOW ORCHESTRATOR ------"
 		print "Total byte usage MID: %f " % bytes_usage
-		#aux_vBBU_splits = dict(self.vBBU_splits) # auxiliary split dict during splitting updt
+		
 		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
 		
 		# ordered list of lowest bw on a vBBU
@@ -567,25 +559,11 @@ class Edge_DC(object):
 		self.FH_phi_port = FH_phi_port
 		self.MID_phi_port = MID_phi_port
 		
-		#for vBBU_id in range(self.n_vBBUs):
-			# creating pool
-		#self.edge_pool[vBBU_id] = Edge_vBBU_Pool(env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table)
-
-		
-		
-		#self.FH_receiver = self.env.process(self.FH_receiver())
-		#self.MID_receiver = self.env.process(self.MID_receiver())
-		#self.MID_sender = self.env.process(self.MID_sender())
-
-	#def add_vBBU_pool(self):
-
 
 class Metro_DC(object):
-	#def __init__(self,env,n_vBBUs,n_cells,splitting_table):
 	def __init__(self,env,splitting_table):
 		self.env=env
 		self.name="metroDC"
-		#self.metro_vBBUs= defaultdict(lambda: defaultdict(float))
 		self.metro_vBBUs= {}
 		self.splitting_table = splitting_table
 		self.n_vBBUs = 0
@@ -623,11 +601,8 @@ class Metro_DC(object):
 		self.battery_energy = 5 + self.n_vBBUs *5
 		self.base_pool_energy = 5 + self.n_vBBUs * 5
 		self.baseline_energy = self.AC_energy + self.battery_energy + self.base_pool_energy
-		# write to base energy LOG
-		# TODO:
 
 class Metro_vBBU_Pool(object):
-	#def __init__(self,env,cell_id,n_vBBUs,metro_vBBU_dict,MID_phi_port):
 	def __init__(self,env,cell_id,n_vBBUs,MID_phi_port,splitting_table):
 		self.env = env
 		self.splitting_table = splitting_table
@@ -636,21 +611,16 @@ class Metro_vBBU_Pool(object):
 		self.name = 'metro_pool_'+str(self.cell_id)
 		self.MID_phi_port = MID_phi_port
 
-		#self.metro_vBBU_dict = metro_vBBU_dict
 		self.metro_vBBU_dict = {}
 		
 		for vBBU_id in range(n_vBBUs):
 			self.metro_vBBU_dict[vBBU_id] = Metro_vBBU(env,cell_id,vBBU_id,MID_phi_port,splitting_table)
-		
-		# writing output of metro_vBBU objs to the MID_phi_port'obj to enable downlink in future
-		#for vBBU in metro_vBBU_dict.values():
-			#vBBU.MID_port = self.MID_phi_port
 
 		self.baseline_energy = 5 + (n_vBBUs * 2)
 
 		base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_energy,self.env.now))
 
-		#add itself on
+		#add itself on MID phi UL
 		self.MID_phi_port.add_UL_entry(self.name,self)
 
 		# here run monitoring or something alike 
@@ -666,7 +636,6 @@ class Metro_vBBU_Pool(object):
 
 
 class Edge_vBBU_Pool(object):
-	#def __init__(self,env,cell_id,n_vBBUs,edge_vBBU_dict,MID_phi_port):
 	def __init__(self,env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table):
 		self.env = env
 		self.cell_id = cell_id
@@ -679,14 +648,8 @@ class Edge_vBBU_Pool(object):
 		self.edge_vBBU_dict = {}
 		for vBBU in range(self.n_vBBUs):
 			self.edge_vBBU_dict[str(vBBU)] = Edge_vBBU(env,cell_id,vBBU,FH_phi_port,MID_phi_port,splitting_table)
-
-			# adding entry in FH to reach vBBU in UL
-			#self.FH_phi_port.add_UL_entry(vBBU,edge_vBBU_dict[vBBU])
 			
 		self.DL_buffer = simpy.Store(env) # communication from metro & orch with this edge pool
-
-		# for vBBU in edge_vBBU_dict.values():
-		# 	vBBU.MID_port = self.MID_phi_port
 
 		self.baseline_energy = 5 + (n_vBBUs * 5)
 		base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_energy,self.env.now))
@@ -745,6 +708,21 @@ base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_en
 		self.splitting_table= splitting_table 	# defaultdict with bw&gops per split
 		self.GOPS= GOPS # every bbu is equal by default=8000GOPS
 
+		self.used_GOPS_interval=0.
+		self.utilization= self.env.process(self.proc_utilization(self.GOPS))
+
+	def proc_utilization(self,GOPS):
+		last_GOPS_interval=0.
+		while True:
+			yield self.env.timeout(1000) # wait 1s to measure percentage GOPS usage
+			diff = self.used_GOPS_interval - last_GOPS_interval
+			
+			pcnt_used = float(diff)/GOPS
+			
+			last_GOPS_interval= self.used_GOPS_interval
+			proc_usage_file.write("{},{},{},{},{},{}\n".format(self.cell_id,self.id,"metro",8000,pcnt_used,self.env.now))
+
+
 class Metro_vBBU(vBBU):
 	def __init__(self,env,cell_id,vBBU_id,MID_phi_port,splitting_table,GOPS=8000,core_dyn_energy=15):
 		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS)
@@ -759,12 +737,11 @@ class Metro_vBBU(vBBU):
 		self.MID_receiver = self.env.process(self.MID_receiver())
 		#self.MID_sender = self.env.process(self.MID_sender(MID_port))
 
+
 	def MID_receiver(self):
 		"""process to get the packet from the FH_switch port buffer"""
 		while True:
 			#print "Time: %f. METRO vBBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
-			#pkt= yield self.FH_switch.upstream[self.id].get()
-			#pkt= yield self.FH_port.buffer.get()
 			pkt = yield self.UL_buffer.get()
 			
 			#print "Time: %f. METRO vBBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
@@ -777,8 +754,6 @@ class Metro_vBBU(vBBU):
 		# print "CPRI_OPTION %d" % pkt.CPRI_option,
 		# print "RRH ID %s " % pkt.dst,
 		# print "Split: %d" % pkt.split
-		# #pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
-		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
 		
 		if pkt.split == 7: # if C-RAN split send everything to MetroCloud
 			#print "Split 7. Pkt%d already processed. Nothing to do" % pkt.id
@@ -789,14 +764,15 @@ class Metro_vBBU(vBBU):
 		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['metro_gops']
 		#print "METRO GOPS split: %d" % GOPS
 		#print "Self gops %d" % self.GOPS
-		#bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][7]['bw'])/1000
 		#print "BW pkt split: %f Mb" % bw_split
+		
 		#timeout proc
 		proc_tout = float(GOPS)/self.GOPS
 		#print "METRO Proc Timeout %f" % proc_tout
 		energy = (float(proc_tout) * (self.core_dyn_energy))/100 #== measured in 10ms instead of 1s
 		start = self.env.now
 		#print "METRO Energy consumption: %f W" % energy
+		self.used_GOPS_interval += GOPS
 		yield self.env.timeout(proc_tout)
 
 		#print "METRO After t_out. Time now= %f" % self.env.now
@@ -804,10 +780,6 @@ class Metro_vBBU(vBBU):
 								self.GOPS,GOPS,energy,start,start+proc_tout,proc_tout))
 		# send pkt to core network (for us it means destroying it)
 		del pkt
-
-		# LOG the proc energy usage
-		#energy_file.write( "{},{},{},{},{},{},{},{}\n".\
-		#format("edge_", MAC_TABLE[ONU.oid],"02", time_stamp,counter, ONU.oid,self.env.now,grant_final_time) )
 
 
 class Edge_vBBU(vBBU):
@@ -836,8 +808,6 @@ class Edge_vBBU(vBBU):
 		"""process to get the packet from the FH_switch port buffer"""
 		while True:
 			#print "Time: %f. BBU%d waiting for pkt in UL_buffer" % (self.env.now, self.id)
-			#pkt= yield self.FH_switch.upstream[self.id].get()
-			#pkt= yield self.FH_port.buffer.get()
 			pkt = yield self.UL_buffer.get()
 			
 			#print "Time: %f. BBU%d starting pkt%d processing (splitting) " % (self.env.now,self.id,pkt.id)
@@ -848,8 +818,7 @@ class Edge_vBBU(vBBU):
 		#print "CPRI_OPTION %d" % pkt.CPRI_option,
 		#print "RRH ID %s " % pkt.dst,
 		#print "Split: %d" % self.split
-		#pkt_split = table_rrh_id[pkt_rrh_id]['split'] # get split of pkt from table
-		#pkt_split = splitting_table[pkt_coding][pkt_CPRI_option][split] # get split of pkt from table
+
 		pkt.split=self.split
 		bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['bw'])/100
 		if pkt.split == 1: # if C-RAN split send everything to MetroCloud
@@ -867,8 +836,8 @@ class Edge_vBBU(vBBU):
 		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['edge_gops']
 		#print "GOPS: %d" % GOPS,
 		#print "Self gops %d" % self.GOPS
-		#bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['bw'])/100
 		#print "BW pkt split: %f Mb" % bw_split,
+
 		#timeout proc
 		proc_tout = float(GOPS)/self.GOPS
 		#print "Proc Timeout %f" % proc_tout,
@@ -904,7 +873,6 @@ class Packet_CPRI(object):
 		self.size = (splits_info[coding][self.CPRI_option][1]['bw'])/100
 		self.prb = CPRI[self.CPRI_option]['PRB']
 		#print self.size
-		#self.PRB = PRB #not represented for now
 		self.id = id # packet id
 		self.src = str(src) #packet source address
 		self.dst = str(dst) #packet destination address
@@ -920,10 +888,9 @@ class Packet_Generator(object):
 		self.cell_id = cell_id
 		self.rrh_id = rrh_id # packet id
 		self.env = env # Simpy Environment
-		self.arrivals_dist = adist #packet arrivals distribution
+		self.adist = adist #packet arrivals distribution
 
 		self.coding = 28 #coding fixed for now
-		#self.CPRI_option = 3 #cpri_option fixed for now
 
 		self.finish = finish # packet end time
 		self.interval = interval
@@ -945,8 +912,6 @@ class Packet_Generator(object):
 		# initial random timeout between RRHs
 		#self.env.timeout(random.random())
 
-		# ORCH doesnt work with random CPRI option yet
-		#self.CPRI_option = random.choice([1,2,3,5,7])
 		while True:
 			# workaround to generate a normal distribution in a range of 1 to 5
 			X = truncnorm((low - mean) / sd, (upp - mean) / sd, mean, sd).rvs().round().astype(int)
@@ -962,7 +927,7 @@ class Packet_Generator(object):
 		"""The generator function used in simulations. """
 		while self.env.now < self.finish:
 			# wait for next transmission
-			yield self.env.timeout(self.arrivals_dist)
+			yield self.env.timeout(self.adist)
 			self.packets_sent += 1
 			#print "New packet generated at %f" % self.env.now
 
@@ -978,26 +943,25 @@ class Packet_Generator(object):
 
 class Cell(object):
 	"""Class representing a fixed set of RRHs connected to a fixed BBU"""
-	def __init__(self,env,cell_id,num_rrhs,FH_phi_port,qlimit=0):
+	def __init__(self,env,cell_id,num_rrhs,FH_phi_port,adist,qlimit=0):
 		self.env = env
 		self.FH_phi_port = FH_phi_port
 		self.cell_id = cell_id #Cell indentifier
 		self.rrh_dict={}
 		for rrh_id in range(0,num_rrhs):
 			#creates the packet generator for each RRH and places it into dict
-			self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,self.FH_phi_port,qlimit)
+			self.rrh_dict[rrh_id] = RRH(self.env,cell_id,rrh_id,self.FH_phi_port,adist,qlimit)
         
 
 class RRH(object):
 	"""Class representing each RRH with its own packet generation (Uplink) to a fixed BBU"""
-	#def __init__(self,env,cell_id,rrh_id,edge_bbu_id,qlimit,FH_switch):
-	def __init__(self,env,cell_id,rrh_id,FH_phi_port,qlimit=0):
+	def __init__(self,env,cell_id,rrh_id,FH_phi_port,adist,qlimit=0):
 		self.env = env
 		self.cell_id = cell_id
 		self.id = rrh_id
-		arrivals_dist = 10 # fixed 10 ms == interval between CPRI hyperframes and LTE frames
+		self.adist = adist # fixed 10 ms == interval between CPRI hyperframes and LTE frames
 		self.str_id = str(self.id)
-		self.pg = Packet_Generator(self.env, self.cell_id,self.id, arrivals_dist)
+		self.pg = Packet_Generator(self.env, self.cell_id,self.id, self.adist)
 
 		if qlimit == 0:# checks if the queue has a size limit
 			queue_limit = None
@@ -1007,8 +971,6 @@ class RRH(object):
 		self.port = RRH_Port(self.env, qlimit=queue_limit) #create RRH PORT (FH) to bbu
 		self.pg.out = self.port #forward packet generator output to RRH port
 		self.sender = self.env.process(self.RRH_sender(FH_phi_port))
-		
-		#self.action=self.env.process(self.run())
 
 	def RRH_sender(self,Phi_port_pool):
 		while True:
@@ -1016,7 +978,7 @@ class RRH(object):
    			self.port.byte_size -= pkt.size
    			if self.port.byte_size < 0:
    				print "Error: RRH %d port buffer sizer < 0" % self.id
-   			#FH_switch.put_UL(self.id,pkt)
+   			# send to edge vbbu	
    			Phi_port_pool.upstream.put(pkt)
    			self.port.packets_tx +=1
 		
@@ -1044,7 +1006,6 @@ class RRH_Port(object):
 
         self.packets_rec += 1
         #print "+1 RRHPort pkt. Packets received: %d" % self.packets_rec
-        #pkt.size = (splits_info[pkt.coding][pkt.CPRI_option][1]['bw'])/1000
         #print "Pkt size: %f" % pkt.size
         tmp = self.byte_size + pkt.size
         #print "RRHPort buffer size: %f"  % tmp
@@ -1347,36 +1308,11 @@ env = simpy.Environment()
 #random.seed()
 #static variables
 splitting_table=splits_info
-adist = 1
-num_cells = 2
-num_RRHs = 7
-
-"""
-Create metro datacenter (put orchestrator inside it)
-	define cell amount and size (amount of RRHs)
-		for each cell
-			create a edge DC (function on edge_cloud)
-				create 1 edge vbbu pool
-					put X edge_vbbu == amount of RRH
-			
-			create 1 metro vbbu pool (function on metro_DC)
-				put X metro_vbbu == amount of RRH
-			
-			create FH phi
-				access edgelist from variable of edge vbbu pool
-			create MID phi
-				access metrolist from variable of metro vbbu pool
-
-			create CELL
-
-# TODO: verify orch uplink
-"""
 
 metro_DC = Metro_DC(env,splitting_table)
 coding = 28
 #orch = Orchestrator(env,num_RRHs,splitting_table,MID_phi_port,edge_vBBU_dict, coding)
 edge_DCs = {}
-
 
 metro_vBBUs={} #all metro vbbus
 edge_vBBUs={} # all edge vbbus
@@ -1394,25 +1330,8 @@ for cell_id in range(num_cells):
 	# create edge DC
 	edge_DCs[cell_id] = Edge_DC(env,cell_id,num_RRHs,FH_phi_port,MID_phi_port)
 
-	#edge_vBBU_dict = {}
-	#metro_vBBU_dict = {}
-	# edge cloud: many, with all edge vbbus of only cell
-	# metro cloud: only 1, with many cells' metro vbbus
-	# for vBBU_id in range(num_RRHs):
-	# 	metro_vBBU_dict[vBBU_id] = Metro_vBBU(env,cell_id,vBBU_id,splitting_table)
-	# 	edge_vBBU_dict[vBBU_id] = Edge_vBBU(env,cell_id,vBBU_id,splitting_table)
-
-	# tell the Edge DC to create a pool
-	# edge_pool = Edge_vBBU_Pool(env,cell_id,num_RRHs,edge_vBBU_dict,MID_phi_port)
-
-
 	# tell the Metro DC to create a pool and its metro_vBBUs
 	metro_DC.add_metro_pool(cell_id,num_RRHs,MID_phi_port)
-
-		#metro_pool = Metro_vBBU_Pool(env,cell_id,num_RRHs,metro_vBBU_dict,MID_phi_port)
-
-	# add merto and edge vBBUs of current cell_id into Orchestrator
-	#orch.add_cell_metro_vBBUs(cell_id, metro_DC.metro_vBBUs[cell_id])
 
 	# edge vBBUs of this cell_id 
 	cell_id_edge_vBBUs = edge_DCs[cell_id].edge_vBBUs
@@ -1427,11 +1346,18 @@ for cell_id in range(num_cells):
 	# letting the orch know the cell's vBBUs and mid port
 	metro_DC.add_cell_on_orch(cell_id, cell_id_edge_vBBUs, MID_phi_port, cell_id_metro_vBBUs)
 
-	Cell(env,cell_id,num_RRHs,FH_phi_port)
-	# for id in range(num_RRHs):
-	# 	RRH(env,cell_id,id,0,FH_phi_port)
+	Cell(env,cell_id,num_RRHs,FH_phi_port,adist)
 
 # time
 #duration= 30000 # 30s
-duration= 10000 # 100s
-env.run(until=duration)
+#duration= 100000 # 100s
+#random.seed(SEED)
+np.random.seed(SEED)
+
+env.run(until=DURATION)
+print "END SIMULATION: %d secs" % (int(env.now)/1000)
+pkts_file.close()
+proc_pkt_file.close()
+bw_usage_file.close()
+base_energy_file.close()
+proc_usage_file.close()
