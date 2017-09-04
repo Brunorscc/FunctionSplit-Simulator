@@ -1,58 +1,78 @@
 import simpy
-import random
-import functools
-import sys
 import argparse
 import logging
 import pandas as pd
 from collections import defaultdict
-import os 
+import os
 import math
-from itertools import izip
 from operator import itemgetter
 import time
 from scipy.stats import truncnorm
 import numpy as np
 
+
 parser = argparse.ArgumentParser(description="Function Splitting - Hibryd RAN Simulator")
-#parser.add_argument("-D", type=str, default='ipact',choices=["ipact","pd_dba"], help="DBA algorithm")
+parser.add_argument("T", type=str, default='Hybrid',choices=["CRAN","DRAN","Hybrid"], help="Topology")
 parser.add_argument("-D", "--duration", type=int, default=10, help="Duration of simulation, in seconds.")
 parser.add_argument("-S", "--seed", type=int, default=10, help="Random number generator seed number.")
+parser.add_argument("-C", "--cells", type=int, default=2, help="Cell clusters number.")
+parser.add_argument("-R", "--rrhs", type=int, default=7, help="Remote radio heads number per cell cluster.")
+parser.add_argument("-A", "--adist", type=int, default=10, help="Interval between CPRI packets arrival in ms.")
+parser.add_argument("-L", "--lthold", type=int, default=60, help="Lower orchestrator's threshold in %, to trigger splitting.")
+parser.add_argument("-H", "--hthold", type=int, default=90, help="Higher orchestrator's threshold in %, to trigger splitting.")
+parser.add_argument("-B", "--bwmid", type=int, default=10, help="Midhaul ports bandwidth in Gbits.")
+parser.add_argument("-I", "--interval", type=int, default=2.001, help="Interval in secs between orchestrator consulting the MID.")
+#parser.add_argument("-Q", "--qlimit", type=int, default=None, help="The size of the FH and MID port queue in bytes.")
+
+"""
+---> TODO arguments <---
+1.coding still fixed
+2.pkt generation distribution's mean (CPRI_option) still fixed at 3.3
+3.QLIMIT in MID and server. Look for common buffer size on switch and server port(vBBU), the latter receives the pause frames
+"""
 args = parser.parse_args()
 
 #Arguments
+TOPOLOGY = args.T
 DURATION = args.duration
 SEED = args.seed
-adist = 10 # 1ms betw
-num_cells = 2
-num_RRHs = 7
+N_CELLS = args.cells
+N_RRHS = args.rrhs
+ADIST = args.adist
+LTHOLD = args.lthold
+HTHOLD = args.hthold
+BWMID = args.bwmid
+INTERVAL = args.interval
+
+print "TOPOLOGY == %s" % TOPOLOGY
+
+logging.basicConfig(filename='func-sim.log',level=logging.DEBUG,format='%(asctime)s %(message)s')
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-# directory = "{}-{}-{}-{}-{}".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION))
-# os.makedirs("csv/"+directory)
-
-# timestamp = time.strftime("%Y-%m-%d_%H:%M:%S")
-# pkts_file = open("csv/{}/{}-pkts.csv".format(directory,timestamp),"w")
-# proc_pkt_file = open("csv/{}/{}-proc-pkt.csv".format(directory,timestamp),"w")
-# bw_usage_file = open("csv/{}/{}-bw-usage.csv".format(directory,timestamp),"w")
-# base_energy_file = open("csv/{}/{}-base-energy.csv".format(directory,timestamp),"w")
-# proc_usage_file = open("csv/{}/{}-proc-usage.csv".format(directory,timestamp),"w")
-
-# timestamp = time.strftime("%Y-%m-%d_%H:%M:%S")
-pkts_file = open("csv/pkt/{}-{}-{}-{}-{}-pkts.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
-proc_pkt_file = open("csv/proc/{}-{}-{}-{}-{}-proc-pkt.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
-bw_usage_file = open("csv/bw/{}-{}-{}-{}-{}-bw-usage.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
-base_energy_file = open("csv/energy/{}-{}-{}-{}-{}-base-energy.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
-proc_usage_file = open("csv/proc/{}-{}-{}-{}-{}-proc-usage.csv".format(num_cells,num_RRHs,adist,str(SEED),str(DURATION)),"w")
+timestamp = time.strftime("%Y-%m-%d_%H:%M:%S")
+os.makedirs("csv/"+timestamp)
+# os.makedirs("csv/"+timestamp+"/pkt")
+# os.makedirs("csv/"+timestamp+"/proc")
+# os.makedirs("csv/"+timestamp+"/bw")
+# os.makedirs("csv/"+timestamp+"/energy")
+pkts_file = open("csv/{}/{}-{}-{}-{}-{}-{}-{}-{}-pkts.csv".format(timestamp,N_CELLS,N_RRHS,ADIST,SEED,DURATION,LTHOLD,HTHOLD,BWMID),"w")
+proc_pkt_file = open("csv/{}/{}-{}-{}-{}-{}-{}-{}-{}-proc-pkt.csv".format(timestamp,N_CELLS,N_RRHS,ADIST,SEED,DURATION,LTHOLD,HTHOLD,BWMID),"w")
+bw_usage_file = open("csv/{}/{}-{}-{}-{}-{}-{}-{}-{}-bw-usage.csv".format(timestamp,N_CELLS,N_RRHS,ADIST,SEED,DURATION,LTHOLD,HTHOLD,BWMID),"w")
+base_energy_file = open("csv/{}/{}-{}-{}-{}-{}-{}-{}-{}-base-energy.csv".format(timestamp,N_CELLS,N_RRHS,ADIST,SEED,DURATION,LTHOLD,HTHOLD,BWMID),"w")
+proc_usage_file = open("csv/{}/{}-{}-{}-{}-{}-{}-{}-{}-proc-usage.csv".format(timestamp,N_CELLS,N_RRHS,ADIST,SEED,DURATION,LTHOLD,HTHOLD,BWMID),"w")
 
 
-DURATION = DURATION * 1000
+DURATION = DURATION * 1000 # transforming second to ms
+BWMID = BWMID * 1000 # transforming GB to MB
+INTERVAL = INTERVAL * 1000
+LTHOLD = LTHOLD/100.0
+HTHOLD = HTHOLD/100.0
 
 pkts_file.write("timestamp,pkt_id,cell_id,prb,cpri_option,coding\n") #DONE
 proc_pkt_file.write("cell_id,vbbu_id,cloud,pkt_id,split,gops_vbbu,gops_pkt,energy,time_start,time_end,proc_delay\n") #DONE
 bw_usage_file.write("cell_id,vbbu_id,haul,pkt_id,bw,plane,type\n") #DONE
 base_energy_file.write("entity,id,energy,timestamp\n") # DONE
-proc_usage_file.write("cell_id,vbbu_id,cloud,gops,pcnt,timestamp\n")
+proc_usage_file.write("cell_id,vbbu_id,cloud,gops,pcnt,timestamp\n") #DONE
 
 #monitor 'justice' metrics after implementing joint (bw and energy) split algorithm
 
@@ -106,7 +126,8 @@ tbs_table= pd.read_excel(dir_path + "/tabelas/TBS-table.xlsx")
 # QmPCFICH=2.0 	# QPSK
 # QmPDCCH=2.0  	# QPSK
 # PDSCH_REs= n_RB *(n_RB_SC *(n_SUB_SYM-CFI)-(RefSym_RES*nAnt)) # =150
-# PCFICH_REs=16.0 # Regardless of System Bandwidth, PCFICH is always carried by 4 REGs (16 REs) at the first symbol of each subframe
+# Regardless of System Bandwidth, PCFICH is always carried by 4 REGs (16 REs) at the first symbol of each subframe
+# PCFICH_REs=16.0 
 # PHICH_REs=12.0 	#one PHICH group
 # PDCCH_REs=144.0 	#aggregation lvl 4
 # nUE=1 	# number of users per TTI
@@ -135,10 +156,6 @@ CPRI={\
 7:{'Mhz':5,'Fs':30.72,'PRB':100}}
 
 splits_info = defaultdict( lambda: defaultdict( lambda: defaultdict( lambda: defaultdict(float))))
-
-# Multilevel nested dict \/
-# nested_dict = lambda: defaultdict(nested_dict)
-# nest = nested_dict()
 
 for coding in range(0,29):
 	for cpri_option in used_CPRIs:
@@ -258,14 +275,23 @@ for coding in range(0,29):
 # print "---"
 
 #-----------CLASSES AND SIMULATOR-------------
-
+# transform defaultdict into normal dict. remove garbage from print
 def default_to_regular(d):
 	if isinstance(d, defaultdict):
 		d = {k: default_to_regular(v) for k, v in d.iteritems()}
 	return d
 
 class Orchestrator(object):
-	def __init__ (self,env,splitting_table,fix_coding,interval=2001,high_thold=0.9,low_thold=0.6): #multiplexing_rate=2
+	""" Heuristic now: put everything in metro, limited by mid BW and proactivelly before losses appear (60%<x<90%)
+	TODOs: 
+	1. Consider energy in calcs
+	2. Consider justice in calcs
+	3. Consider maximum chain delay in calcs (QOS)
+		3.1 Measure chain latency
+			3.1.1 (all of them desired) Measure transmission + queing + processing delays
+
+	"""
+	def __init__ (self,env,splitting_table,fix_coding,interval=2001,high_thold=0.9,low_thold=0.6,topology='Hybrid'):
 		self.env=env
 		self.interval = interval
 		self.fix_coding = fix_coding
@@ -279,7 +305,8 @@ class Orchestrator(object):
 		self.high_thold = high_thold
 		self.low_thold = low_thold
 
-		self.read_metrics = self.env.process(self.read_metrics())
+		if topology == 'Hybrid':
+			self.read_metrics = self.env.process(self.read_metrics())
 	
 	def add_cell(self, cell_id, cell_id_edge_vBBUs, MID_phi_port, cell_id_metro_vBBUs):
 		# [cell_id][vbbu_id]['split']=split
@@ -301,14 +328,16 @@ class Orchestrator(object):
 				self.vBBUs_dict[cell_id][str(vBBU)]['metro_vbbu'] = metro_vBBU
 
 				self.vBBUs_dict[cell_id][str(vBBU)]['split'] = 1
+		else:
+			logging.debug("Error adding cell in Orchestrator. Not 1 to 1 edges and metro vBBUs.")
 
 	def high_splitting_updt(self,cell_id,phi_metrics,vbbu_metrics,MID_port):
 		# total phi drops
 		bytes_usage = phi_metrics['UL_bytes_rx_diff']
 		reduced_bw = 0
 		MID_max_bw = phi_metrics['max_bw']
-		print "\n\n----- ORCHESTRATOR ------"
-		print "Total byte usage MID: %f " % bytes_usage
+		print "----- ORCHESTRATOR ------"
+		#print "Total byte usage MID: %f " % bytes_usage
 		
 		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
 		
@@ -326,9 +355,7 @@ class Orchestrator(object):
 		#print usage_list
 		#print ""
 		
-		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
 		cpri_option = 3
-		#TODO: Consider energy in calcs
 		
 		diff_bw = 0
 		split = 0
@@ -339,53 +366,55 @@ class Orchestrator(object):
 			except:
 				continue
 
-			print "\nStart test vbbu: %s" % vbbu_tuple[0]
+			#print "\nStart test vbbu: %s" % vbbu_tuple[0]
 			if (bytes_usage) > (self.high_thold * MID_max_bw):
-				print "ENTER IF 1: Bytes usage %f > h_thold %f" % (bytes_usage,(self.high_thold * MID_max_bw))
+				last_bw_diff = 0
+				#print "ENTER IF 1: Bytes usage %f > h_thold %f" % (bytes_usage,(self.high_thold * MID_max_bw))
 				#print "Reduced bw: %f" % reduced_bw
 				#vbbu_split = self.vBBU_splits[vbbu_tuple[0]]
 
 				vbbu_split = self.vBBUs_dict[cell_id][vbbu_tuple[0]]['split']
 
-				print "BLA %s" % self.vBBUs_dict[(cell_id)][vbbu_tuple[0]]
-				print vbbu_tuple
-				print cell_id
-				print vbbu_split
+				#print "BLA %s" % self.vBBUs_dict[(cell_id)][vbbu_tuple[0]]
+				#print vbbu_tuple
+				#print cell_id
+				#print vbbu_split
 				#print "vbbu_split: %d" % vbbu_split
 
 				bw_vbbu_split = self.splitting_table[self.fix_coding][cpri_option][vbbu_split]['bw']
 				last_bw_vbbu_split=bw_vbbu_split
-				print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" % (vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
+				#print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" % \
+				#(vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
 
 				for split in range(vbbu_split+1,7+1):
-					print "Test split %d" % split,
+					#print "Test split %d" % split,
 					bw_split = self.splitting_table[self.fix_coding][cpri_option][split]['bw']
 					# difference between splits
 					diff_bw = bw_vbbu_split - bw_split
-					print "Diff bw= %.3f" % diff_bw
+					#print "Diff bw= %.3f" % diff_bw
 					changed_vBBU_splits[vbbu_tuple[0]] = split
 					
 						#bytes_usage -= diff_bw
 					# if what was reduced is lower than our threshold
 					if (bytes_usage-diff_bw) <= (self.high_thold * MID_max_bw) or split==7:
-						print "ENTER IF 2: diff %f <= h_thold or split 7s" % (bytes_usage-diff_bw)
+						#print "ENTER IF 2: diff %f <= h_thold or split 7s" % (bytes_usage-diff_bw)
 						if (bytes_usage-diff_bw) <= (self.low_thold * MID_max_bw):
-							print "Entrou low_thold"
+							#print "Entrou low_thold"
 							# test if last split bw is > h_thold
 							diff_bw2 = last_bw_diff
-							print diff_bw2
+							#print diff_bw2
 							if (bytes_usage-diff_bw2) > (self.high_thold * MID_max_bw):
 								#if one split > h_thold and the other < l_thold...
 								# let the higher split and choose split of the next vbbu
-								print "Last split is higher than h_thold. %f" % (bytes_usage-diff_bw2)
-								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split)
+								#print "Last split is higher than h_thold. %f" % (bytes_usage-diff_bw2)
+								#print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split)
 								changed_vBBU_splits[vbbu_tuple[0]] = split
 							else:
-								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split-1)
+								#print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split-1)
 								changed_vBBU_splits[vbbu_tuple[0]] = split-1
 							break
 						bytes_usage -= diff_bw
-						print "Next vbbu. Bytes usage now: %f " % bytes_usage
+						#print "Next vbbu. Bytes usage now: %f " % bytes_usage
 						#set split
 						break
 					last_bw_diff=diff_bw
@@ -399,7 +428,8 @@ class Orchestrator(object):
 				#print "CADA %d" % cada
 				#create pkt
 				str_vbbu = str(cada)
-				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+str(cell_id), 'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
+				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+str(cell_id), \
+							  'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
 				#print split_updt
 				#send to MID_port
 				
@@ -408,6 +438,8 @@ class Orchestrator(object):
 				self.vBBUs_dict[int(cell_id)][cada]['split'] = changed_vBBU_splits[cada]
 
 				MID_port.downstream.put(split_updt)
+		else:
+			logging.debug("WARNING: No better splitting possible at cell%d. Actual MID BW: %.3f" %(cell_id,MID_max_bw))
 
 	def low_splitting_updt(self,cell_id,phi_metrics,vbbu_metrics,MID_port):
 		# total phi drops
@@ -415,7 +447,7 @@ class Orchestrator(object):
 		reduced_bw = 0
 		MID_max_bw = phi_metrics['max_bw']
 		print "----- LOW ORCHESTRATOR ------"
-		print "Total byte usage MID: %f " % bytes_usage
+		#print "Total byte usage MID: %f " % bytes_usage
 		
 		changed_vBBU_splits = {} # dict of changed vbbu splits key: vbbu_id and value: split 
 		
@@ -430,7 +462,7 @@ class Orchestrator(object):
 		# ordered list
 		usage_list.sort(key=itemgetter(1))
 		#print "usage list"
-		print usage_list
+		#print usage_list
 		#TODO: Consider that CPRI_option changes. Now CPRI is fixed = 3
 		cpri_option = 3
 		#TODO: Consider energy in calcs
@@ -443,9 +475,9 @@ class Orchestrator(object):
 			except:
 				continue
 
-			print "\nStart test vbbu: %s" % vbbu_tuple[0]
+			#print "\nStart test vbbu: %s" % vbbu_tuple[0]
 			if (bytes_usage) <= (self.low_thold * MID_max_bw):
-				print "ENTER IF 1: Bytes usage %f <= l_thold %f" % (bytes_usage,(self.low_thold * MID_max_bw))
+				#print "ENTER IF 1: Bytes usage %f <= l_thold %f" % (bytes_usage,(self.low_thold * MID_max_bw))
 				#print self.vBBU_splits
 				#print "Reduced bw: %f" % reduced_bw
 				#vbbu_split = self.vBBU_splits[vbbu_tuple[0]]
@@ -453,11 +485,12 @@ class Orchestrator(object):
 				#print "vbbu_split: %d" % vbbu_split
 				bw_vbbu_split = self.splitting_table[self.fix_coding][cpri_option][vbbu_split]['bw']
 				last_bw_vbbu_split = bw_vbbu_split
-				print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" % (vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
+				#print "Actual: vbbu split= %d | vBBU bw= %.3f | BW last split: %.3f" %\
+				# (vbbu_split, bw_vbbu_split, last_bw_vbbu_split)
 
-				print range(1,vbbu_split)[::-1]
+				#print range(1,vbbu_split)[::-1]
 				for split in range(1,vbbu_split)[::-1]:
-					print "Test split %d" % split,
+					#print "Test split %d" % split,
 					bw_split = self.splitting_table[self.fix_coding][cpri_option][split]['bw']
 					# difference between splits
 					diff_bw = bw_split - bw_vbbu_split
@@ -466,50 +499,54 @@ class Orchestrator(object):
 					# if split == vbbu_split-1:
 					# 	last_bw_diff = diff_bw
 
-					print "DIFF BW: %.3f " % diff_bw
+					#print "DIFF BW: %.3f " % diff_bw
 					changed_vBBU_splits[vbbu_tuple[0]] = split
 					
 					# if (bytes_usage+diff_bw) > (self.high_thold * self.MID_max_bw):
 					# 	changed_vBBU_splits[vbbu_tuple[0]] = split+1
 					# 	diff_bw = last_bw_diff
-					# 	print "MAIOR. Volta p/ split %d c/ diff %f" % (split+1, diff_bw)
+					# 	#print "MAIOR. Volta p/ split %d c/ diff %f" % (split+1, diff_bw)
 					# 	break
 					# if what was reduced is lower than our threshold
 					if (bytes_usage+diff_bw) > (self.low_thold * MID_max_bw) or split == 1:
-						print "ENTER IF 2: diff %f > l_thold or split==1" % (bytes_usage+diff_bw)
+						#print "ENTER IF 2: diff %f > l_thold or split==1" % (bytes_usage+diff_bw)
 						if (bytes_usage+diff_bw) > (self.high_thold * MID_max_bw):
-							print "Entrou low_thold"
+							#print "Entrou low_thold"
 							# test if last split bw is > h_thold
 							diff_bw2 = last_bw_diff
 							if (bytes_usage+diff_bw2) <= (self.low_thold * MID_max_bw):
 								#if one split > h_thold and the other < l_thold...
 								# let the lower split and choose split of the next vbbu
+								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split+1)
 								changed_vBBU_splits[vbbu_tuple[0]] = split+1
 							else:
+								print "Changing VBBU%d to split %d" % (vbbu_tuple[0],split)
 								break
 							
-						print "Entrou 4"
+						#print "Entrou 4"
 						
 						bytes_usage += diff_bw
-						print bytes_usage
+						#print bytes_usage
 						#set split
 						break
 					last_bw_diff=diff_bw
 
 
 		#print "CHANGED"
-		#print changed_vBBU_splits
+		print changed_vBBU_splits
 		if len(changed_vBBU_splits) > 0: # write changes to the EDGE VBBU POOL
 			for cada in changed_vBBU_splits:
-				print "CADA %s" % cada
+				#print "CADA %s" % cada
 				#create pkt
 				str_vbbu = str(cada)
-				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+str(cell_id), 'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
+				split_updt = {'plane':'ctrl','src':'orchestrator', 'dst':'edge_pool_'+str(cell_id),\
+							  'vBBU_id':cada, 'split':changed_vBBU_splits[cada]}
 				#print split_updt
 				
 				#send to MID_port
 				MID_port.downstream.put(split_updt)
 				
+				# change split in vbbu_dict 
 				self.vBBUs_dict[int(cell_id)][cada]['split'] = changed_vBBU_splits[cada]
 				
 
@@ -517,31 +554,36 @@ class Orchestrator(object):
 		# wait interval to gather metrics
 		while True:
 			yield self.env.timeout(self.interval)
-			print "---> Time now: %d <--- " % self.env.now
-			print self.vBBUs_dict.keys()
+			#print "---> Time now: %d <--- " % self.env.now
+			#print self.vBBUs_dict.keys()
 			for cell_id in self.vBBUs_dict.keys():
 			# read amount of bytes dropped in midhaul
 
 				#phi_metrics,vbbu_metrics = self.MID_port.get_metrics()
-				print cell_id
+				#print cell_id
 				MID_port = self.vBBUs_dict[cell_id]['mid_port'] # get MID port
 				phi_metrics,vbbu_metrics = MID_port.get_metrics() # get metrics of MID port
 				MID_max_bw = phi_metrics['max_bw'] # get max BW of MID
+				#print MID_max_bw
+				#print self.high_thold
 				bytes_usage = phi_metrics['UL_bytes_rx_diff'] # get last bytes usage of MID
 				print "bytes_usage %.3f of MIDport from cell %d" % (bytes_usage,cell_id)
-				
+				#print "HIGH: %.3f" % (self.high_thold * MID_max_bw)
+				#print "LOW: %.3f" % (self.low_thold * MID_max_bw)
 				# default high_thold is a max of 90% in order to trigger splitting updt
 				if (bytes_usage > (self.high_thold * MID_max_bw)):
+					#print "HIGH: %.3f" % (float(self.high_thold * MID_max_bw))
 					self.high_splitting_updt(cell_id, phi_metrics, vbbu_metrics, MID_port)
 				elif (bytes_usage <= (self.low_thold * MID_max_bw)):
 				 	self.low_splitting_updt(cell_id, phi_metrics, vbbu_metrics, MID_port)
-				print "\n\n"
+				#print "\n\n"
 
 
 class Edge_DC(object):
 	""" 1 Edge DC supports only 1 RRH cell currently"""
-	def __init__ (self,env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port):
+	def __init__ (self,env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,topology="Hybrid"):
 		self.env=env
+		self.topology = topology
 		self.name="edgeDC_"+str(cell_id)
 		#self.baseline_energy=700	#from china mobile 2014 white paper
 		self.AC_energy= 100 + n_vBBUs * 50
@@ -551,8 +593,8 @@ class Edge_DC(object):
 
 		base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_energy,self.env.now))
 
-		self.edge_pool= Edge_vBBU_Pool(env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table)
-		print "Edge_pool %d = %s" % (cell_id,self.edge_pool)
+		self.edge_pool= Edge_vBBU_Pool(env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table,topology=topology)
+		#print "Edge_pool %d = %s" % (cell_id,self.edge_pool)
 
 		self.edge_vBBUs = self.edge_pool.edge_vBBU_dict
 
@@ -561,18 +603,18 @@ class Edge_DC(object):
 		
 
 class Metro_DC(object):
-	def __init__(self,env,splitting_table):
+	def __init__(self,env,splitting_table,H_THOLD,L_THOLD,interval,topology):
 		self.env=env
 		self.name="metroDC"
 		self.metro_vBBUs= {}
 		self.splitting_table = splitting_table
 		self.n_vBBUs = 0
-
+		print "Metro H_THOLD %f" % H_THOLD
+		print "Metro L_THOLD %f" % L_THOLD
 		# 1 metro pool per cell
 		self.metro_pools={}
 		self.fix_coding = 28
-		self.interval = 2001
-		self.orchestrator = Orchestrator(env,splitting_table,self.fix_coding,interval=2001,high_thold=0.9,low_thold=0.6)
+		self.orchestrator = Orchestrator(env,splitting_table,self.fix_coding,interval=interval,high_thold=H_THOLD,low_thold=L_THOLD,topology=topology)
 
 		self.action=self.env.process(self.run())
 
@@ -636,7 +678,7 @@ class Metro_vBBU_Pool(object):
 
 
 class Edge_vBBU_Pool(object):
-	def __init__(self,env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table):
+	def __init__(self,env,cell_id,n_vBBUs,FH_phi_port,MID_phi_port,splitting_table,topology="Hybrid"):
 		self.env = env
 		self.cell_id = cell_id
 		self.name = 'edge_pool_'+str(self.cell_id)
@@ -647,7 +689,7 @@ class Edge_vBBU_Pool(object):
 		#self.edge_vBBU_dict = edge_vBBU_dict
 		self.edge_vBBU_dict = {}
 		for vBBU in range(self.n_vBBUs):
-			self.edge_vBBU_dict[str(vBBU)] = Edge_vBBU(env,cell_id,vBBU,FH_phi_port,MID_phi_port,splitting_table)
+			self.edge_vBBU_dict[str(vBBU)] = Edge_vBBU(env,cell_id,vBBU,FH_phi_port,MID_phi_port,splitting_table,topology=topology)
 			
 		self.DL_buffer = simpy.Store(env) # communication from metro & orch with this edge pool
 
@@ -668,14 +710,14 @@ class Edge_vBBU_Pool(object):
 	def listen_orchestrator(self):
 		while True:
 			pkt = yield self.DL_buffer.get()
-			print pkt
+			#print pkt
 			if pkt['dst'] == self.name:
 				self.set_vBBU_split(pkt['vBBU_id'],pkt['split'])
 
 
 	def set_vBBU_split(self,vBBU_id,split):
 		# orchestrator changing a split option of a vBBU
-		print "Setting split of vBBU%s to %d" % (vBBU_id,split)
+		#print "Setting split of vBBU%s to %d" % (vBBU_id,split)
 		self.edge_vBBU_dict[vBBU_id].set_split(split)
 
 
@@ -701,12 +743,13 @@ base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_en
 	 We consider RRHs to not shutdown for energy saving, they're always UP
 	-------------------------------------
 	"""
-	def __init__ (self,env,cell_id,vBBU_id,splitting_table,GOPS=8000):
-		self.env= env
+	def __init__ (self,env,cell_id,vBBU_id,splitting_table,GOPS=8000,topology="Hybrid"):
+		self.env = env
+		self.topology = topology
 		self.cell_id = cell_id
 		self.id = vBBU_id
-		self.splitting_table= splitting_table 	# defaultdict with bw&gops per split
-		self.GOPS= GOPS # every bbu is equal by default=8000GOPS
+		self.splitting_table = splitting_table 	# defaultdict with bw&gops per split
+		self.GOPS = GOPS # every bbu is equal by default=8000GOPS
 
 		self.used_GOPS_interval=0.
 		self.utilization= self.env.process(self.proc_utilization(self.GOPS))
@@ -720,7 +763,8 @@ base_energy_file.write("{},{},{},{}\n".format(self.name,cell_id,self.baseline_en
 			pcnt_used = float(diff)/GOPS
 			
 			last_GOPS_interval= self.used_GOPS_interval
-			proc_usage_file.write("{},{},{},{},{},{}\n".format(self.cell_id,self.id,"metro",8000,pcnt_used,self.env.now))
+			proc_usage_file.write("{},{},{},{},{},{}\n".\
+				format(self.cell_id,self.id,"metro",8000,pcnt_used,self.env.now))
 
 
 class Metro_vBBU(vBBU):
@@ -783,15 +827,15 @@ class Metro_vBBU(vBBU):
 
 
 class Edge_vBBU(vBBU):
-	def __init__(self,env,cell_id,vBBU_id,FH_phi_port,MID_phi_port,splitting_table,GOPS=8000,core_dyn_energy=30):
-		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS)
+	def __init__(self,env,cell_id,vBBU_id,FH_phi_port,MID_phi_port,splitting_table,GOPS=8000,core_dyn_energy=30,topology="Hybrid"):
+		vBBU.__init__(self,env,cell_id,vBBU_id,splitting_table,GOPS,topology=topology)
 		self.core_dyn_energy = core_dyn_energy
 		self.split=1 # variable not in metro_vbbu, because after edgesplit the pkt gets variable split
 		self.UL_buffer = simpy.Store(self.env)
 
 		self.FH_phi_port = FH_phi_port
 		self.MID_phi_port = MID_phi_port
-		
+		#print self.topology
 		# TODO: DL functions 
 		#self.DL_buffer = simpy.Store(self.env)
 
@@ -819,21 +863,28 @@ class Edge_vBBU(vBBU):
 		#print "RRH ID %s " % pkt.dst,
 		#print "Split: %d" % self.split
 
-		pkt.split=self.split
-		bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['bw'])/100
-		if pkt.split == 1: # if C-RAN split send everything to MetroCloud
-			#print "Split 1. Send pkt straight to metroCloud."
-			# send pkt to Metro
-			pkt.size= bw_split
-			energy = 0.001
-			start = self.env.now
-			proc_pkt_file.write("{},{},{},{},{},{},{},{},{},{}\n".format(self.cell_id,self.id,"edge",pkt.id,\
-							pkt.split,self.GOPS,0,energy,start,start,0))
-			self.MID_phi_port.upstream.put(pkt)
-			return
+		if self.topology == "DRAN":
+			#print "Entrou DRAN"
+			pkt.split = 7
+		else:
+			pkt.split = self.split
+			if pkt.split == 1 or self.topology == 'CRAN': # if C-RAN split send everything to MetroCloud
+				#print "entrou C-RAN"
+				#print "Split 1. Send pkt straight to metroCloud."
+				# send pkt to Metro
+				bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['bw'])/100
+				pkt.size= bw_split
+				energy = 0.001
+				start = self.env.now
+				proc_pkt_file.write("{},{},{},{},{},{},{},{},{},{}\n".format(self.cell_id,self.id,"edge",pkt.id,\
+								pkt.split,self.GOPS,0,energy,start,start,0))
+				self.MID_phi_port.upstream.put(pkt)
+				return
 
+
+		bw_split = (self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['bw'])/100	
 		#by packets attributes (MCS, CPRI option) and its split, get GOPS and BW from table
-		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][self.split]['edge_gops']
+		GOPS = self.splitting_table[pkt.coding][pkt.CPRI_option][pkt.split]['edge_gops']
 		#print "GOPS: %d" % GOPS,
 		#print "Self gops %d" % self.GOPS
 		#print "BW pkt split: %f Mb" % bw_split,
@@ -876,7 +927,7 @@ class Packet_CPRI(object):
 		self.id = id # packet id
 		self.src = str(src) #packet source address
 		self.dst = str(dst) #packet destination address
-		pkts_file.write("{},{},{},{},{},{}\n".format(self.time,self.id,self.cell_id,self.prb,self.CPRI_option,self.coding))
+		pkts_file.write("{},{},{},{},{},{}\n".format(time,id,cell_id,self.prb,CPRI_option,coding))
 
 	def __repr__(self):
 		return "id: {}, src: {}, time: {}, CPRI_option: {}, coding: {}".\
@@ -1158,7 +1209,7 @@ class Phi_port_pool(object):
 	def bw_check(self):
 		while True:
 			yield self.env.timeout(self.bw_check_interval)
-			print "---MID CHECK ---"
+			#print "---MID CHECK ---"
 			
 			#calc usage
 			self.UL_bytes_tx_diff = self.UL_bytes_tx - self.last_UL_bytes_tx
@@ -1177,14 +1228,14 @@ class Phi_port_pool(object):
 			self.last_UL_pkt_drop = self.UL_pkt_drop
 			self.last_UL_bytes_drop = self.UL_bytes_drop
 
-			print ""
-			print "UL rx: %d pkts and %.3f Mbps" % (self.UL_pkt_rx_diff,self.UL_bytes_rx_diff)
-			print "UL drops: %d pkts and %.3f Mbps " % (self.UL_pkt_drop_diff, self.UL_bytes_drop_diff)
-			print "UL tx: %d pkts and %.3f Mbps" % (self.UL_pkt_tx_diff, self.UL_bytes_tx_diff)
+			#print ""
+			#print "UL rx: %d pkts and %.3f Mbps" % (self.UL_pkt_rx_diff,self.UL_bytes_rx_diff)
+			#print "UL drops: %d pkts and %.3f Mbps " % (self.UL_pkt_drop_diff, self.UL_bytes_drop_diff)
+			#print "UL tx: %d pkts and %.3f Mbps" % (self.UL_pkt_tx_diff, self.UL_bytes_tx_diff)
 
 			for vBBU in self.UL_metrics:
 				#calc usage
-				print vBBU
+				#print vBBU
 				self.UL_metrics[vBBU]['UL_bytes_tx_diff'] = self.UL_metrics[vBBU]['UL_bytes_tx'] - self.UL_metrics[vBBU]['last_UL_bytes_tx']
 				self.UL_metrics[vBBU]['UL_pkt_tx_diff'] = self.UL_metrics[vBBU]['UL_pkt_tx'] - self.UL_metrics[vBBU]['last_UL_pkt_tx']
 				self.UL_metrics[vBBU]['UL_bytes_rx_diff'] = self.UL_metrics[vBBU]['UL_bytes_rx'] - self.UL_metrics[vBBU]['last_UL_bytes_rx']
@@ -1201,16 +1252,19 @@ class Phi_port_pool(object):
 				self.UL_metrics[vBBU]['last_UL_pkt_drop'] = self.UL_metrics[vBBU]['UL_pkt_drop']
 				self.UL_metrics[vBBU]['last_UL_bytes_drop'] = self.UL_metrics[vBBU]['UL_bytes_drop']
 
-				print ""
-				print "vBBU%s UL rx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_pkt_rx_diff'],self.UL_metrics[vBBU]['UL_bytes_rx_diff'])
-				print "vBBU%s UL drops: %d pkts and %.3f Mbps " % (vBBU, self.UL_metrics[vBBU]['UL_pkt_drop_diff'], self.UL_metrics[vBBU]['UL_bytes_drop_diff'])
-				print "vBBU%s UL tx: %d pkts and %.3f Mbps" % (vBBU, self.UL_metrics[vBBU]['UL_pkt_tx_diff'], self.UL_metrics[vBBU]['UL_bytes_tx_diff'])
+				#print ""
+				#print "vBBU%s UL rx: %d pkts and %.3f Mbps" % \
+				#(vBBU, self.UL_metrics[vBBU]['UL_pkt_rx_diff'],self.UL_metrics[vBBU]['UL_bytes_rx_diff'])
+				#print "vBBU%s UL drops: %d pkts and %.3f Mbps " % \
+				#(vBBU, self.UL_metrics[vBBU]['UL_pkt_drop_diff'], self.UL_metrics[vBBU]['UL_bytes_drop_diff'])
+				#print "vBBU%s UL tx: %d pkts and %.3f Mbps" % \
+				#(vBBU, self.UL_metrics[vBBU]['UL_pkt_tx_diff'], self.UL_metrics[vBBU]['UL_bytes_tx_diff'])
 
 
 			# zeroing counters
 			self.UL_bw_interval = 0
 			self.DL_bw_interval = 0
-			print "------"
+			#print "------"
 
 	def get_metrics(self):
 		self.phi_UL_metrics={} #dict of total PHI port metrics
@@ -1257,11 +1311,13 @@ class Phi_port_pool(object):
 					self.UL_metrics[pkt.dst]['UL_pkt_drop']+= 1
 					self.UL_metrics[pkt.dst]['UL_bytes_drop']+= pkt.size
 					
-					bw_usage_file.write("{},{},{},{},{},{},{}\n".format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"drop"))
+					bw_usage_file.write("{},{},{},{},{},{},{}\n".\
+					format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"drop"))
 					del pkt
 
 				else:
-					bw_usage_file.write("{},{},{},{},{},{},{}\n".format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"fw"))
+					bw_usage_file.write("{},{},{},{},{},{},{}\n".\
+						format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"fw"))
 					if pkt.plane == 'ctrl': # IF pkt from edge goes to metro (UL)
 						self.UL_vBBU_obj_dict['metro_pool'].UL_buffer.put(pkt)
 					else:
@@ -1279,7 +1335,8 @@ class Phi_port_pool(object):
 			else:
 				#print self.UL_vBBU_obj_dict[pkt.dst]
 				# send pkt to UL end
-				bw_usage_file.write("{},{},{},{},{},{},{}\n".format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"fw"))
+				bw_usage_file.write("{},{},{},{},{},{},{}\n".\
+					format(pkt.cell_id,pkt.rrh_id,self.name,pkt.id,pkt.size,pkt.plane,"fw"))
 				self.UL_vBBU_obj_dict[pkt.dst].UL_buffer.put(pkt)
 				# ALL UL
 				self.UL_bytes_tx += pkt.size
@@ -1295,23 +1352,22 @@ class Phi_port_pool(object):
 			#print pkt
 			#print "DL pkt dst: %s" % pkt['dst']
 			#print self.DL_vBBU_obj_dict 
-			print "CELL: %d" % self.cell_id
-			print pkt
-			print pkt['dst']
-			print self.DL_vBBU_obj_dict
-			print self.DL_vBBU_obj_dict[pkt['dst']]
+			#print "CELL: %d" % self.cell_id
+			#print pkt
+			#print pkt['dst']
+			#print self.DL_vBBU_obj_dict
+			#print self.DL_vBBU_obj_dict[pkt['dst']]
 			self.DL_vBBU_obj_dict[pkt['dst']].DL_buffer.put(pkt)
-			print "----------"
+			#print "----------"
 
 
 env = simpy.Environment()
-#random.seed()
 #static variables
 splitting_table=splits_info
 
-metro_DC = Metro_DC(env,splitting_table)
+metro_DC = Metro_DC(env,splitting_table,HTHOLD,LTHOLD,INTERVAL,TOPOLOGY)
 coding = 28
-#orch = Orchestrator(env,num_RRHs,splitting_table,MID_phi_port,edge_vBBU_dict, coding)
+#orch = Orchestrator(env,N_RRHS,splitting_table,MID_phi_port,edge_vBBU_dict, coding)
 edge_DCs = {}
 
 metro_vBBUs={} #all metro vbbus
@@ -1320,18 +1376,18 @@ edge_vBBUs={} # all edge vbbus
 FH_phi_ports_dict = {} # all FHs (1 for each cell)
 MID_phi_ports_dict = {} # all MID ports (1 for each edge DC)
 
-for cell_id in range(num_cells):
+for cell_id in range(N_CELLS):
 	FH_phi_port = Phi_port_pool(env,'FH',cell_id)
 	FH_phi_ports_dict[cell_id] = FH_phi_port
 	
-	MID_phi_port = Phi_port_pool(env,'MID',cell_id,max_bw=10000)
+	MID_phi_port = Phi_port_pool(env,'MID',cell_id,max_bw=BWMID)
 	MID_phi_ports_dict[cell_id] = MID_phi_port
 
 	# create edge DC
-	edge_DCs[cell_id] = Edge_DC(env,cell_id,num_RRHs,FH_phi_port,MID_phi_port)
+	edge_DCs[cell_id] = Edge_DC(env,cell_id,N_RRHS,FH_phi_port,MID_phi_port,topology=TOPOLOGY)
 
 	# tell the Metro DC to create a pool and its metro_vBBUs
-	metro_DC.add_metro_pool(cell_id,num_RRHs,MID_phi_port)
+	metro_DC.add_metro_pool(cell_id,N_RRHS,MID_phi_port)
 
 	# edge vBBUs of this cell_id 
 	cell_id_edge_vBBUs = edge_DCs[cell_id].edge_vBBUs
@@ -1346,12 +1402,11 @@ for cell_id in range(num_cells):
 	# letting the orch know the cell's vBBUs and mid port
 	metro_DC.add_cell_on_orch(cell_id, cell_id_edge_vBBUs, MID_phi_port, cell_id_metro_vBBUs)
 
-	Cell(env,cell_id,num_RRHs,FH_phi_port,adist)
+	Cell(env,cell_id,N_RRHS,FH_phi_port,ADIST)
 
 # time
 #duration= 30000 # 30s
 #duration= 100000 # 100s
-#random.seed(SEED)
 np.random.seed(SEED)
 
 env.run(until=DURATION)
